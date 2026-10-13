@@ -138,6 +138,14 @@ impl Matcher {
         self.japanese_text.len()
     }
 
+    /// The kana at the cursor (folded, as matched), `None` once completed.
+    pub fn current_kana(&self) -> Option<char> {
+        if self.completed {
+            return None;
+        }
+        self.japanese_text.get(self.japanese_index()).copied()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.japanese_text.is_empty()
     }

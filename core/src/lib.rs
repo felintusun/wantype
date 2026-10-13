@@ -16,6 +16,7 @@
 mod chars;
 mod compat;
 pub mod fixtures;
+pub mod flick;
 pub mod ladder;
 mod matcher;
 mod rules;

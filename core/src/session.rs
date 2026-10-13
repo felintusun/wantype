@@ -696,6 +696,12 @@ impl Session {
         self.round.as_ref().is_some_and(|r| r.matcher.completed())
     }
 
+    /// The kana at the cursor, what a [`flick::Composer`](crate::flick)
+    /// aims for; `None` when completed or without a sentence.
+    pub fn next_kana(&self) -> Option<char> {
+        self.round.as_ref()?.matcher.current_kana()
+    }
+
     pub fn stats(&self) -> Stats {
         let Some(r) = &self.round else {
             return Stats {
