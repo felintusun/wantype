@@ -1,0 +1,17 @@
+[package]
+name = "wantype-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+wana_kana = "5"
+
+[dev-dependencies]
+# The compatibility tables in `compat.rs` are checked against it.
+unicode-normalization = "0.1"
+proptest = "1"
+

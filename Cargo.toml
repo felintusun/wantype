@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["core", "app", "xtask", "e2e"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/felintusun/wantype"
+
+# Release builds are the shipped wasm: optimise for size. Debuginfo is
+# stripped because rustc 1.97's DWARF makes wasm-opt abort.
+[profile.release]
+strip = "debuginfo"
+opt-level = "z"
+lto = true
+codegen-units = 1

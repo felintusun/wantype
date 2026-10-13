@@ -1,0 +1,6 @@
+# The Content-Security-Policy names Trunk's inline loader script by hash,
+# which changes with every build: added after release builds.
+[[hooks]]
+stage = "post_build"
+command = "cargo"
+command_arguments = ["xtask", "csp"]

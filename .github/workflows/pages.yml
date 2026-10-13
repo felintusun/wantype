@@ -1,0 +1,74 @@
+# Builds the site and publishes it on GitHub Pages (Settings → Pages →
+# Source: GitHub Actions). Monthly, it rebuilds with Tatoeba's newer exports.
+# Linted with zizmor (`just lint`); actions are pinned to commits.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 1 * *"
+
+permissions: {}
+
+jobs:
+  build:
+    name: Test and build
+    runs-on: ubuntu-latest
+    # A newer push supersedes a running build.
+    concurrency:
+      group: build
+      cancel-in-progress: true
+    # Debian 13 with Rust 1.99.0, pinned like the actions.
+    container:
+      image: rust:1.99.0-trixie@sha256:81015672d6939b0265f09adf96d5de125482bb1330106076956b0518e74edc90
+    permissions:
+      contents: read # check out the code
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: just@1.58.0,trunk@0.21.14
+      # The data is rebuilt once a month, with Tatoeba's newer exports, or
+      # when the code that builds it changes; the exports (≈ 170 MB) are
+      # downloaded once a month. The cache keys change with the month.
+      - id: month
+        run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - id: data
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/public/sentences
+          key: sentences-${{ steps.month.outputs.month }}-${{ hashFiles('core/src/**', 'xtask/src/**', 'xtask/data/**', 'Cargo.lock') }}
+      - if: steps.data.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/tatoeba
+          key: tatoeba-${{ steps.month.outputs.month }}
+      - run: just test
+      - run: just build
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: target/site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    # Deployments queue, none cancelled half way.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write # publish the site
+      id-token: write # prove to Pages where the deployment comes from
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

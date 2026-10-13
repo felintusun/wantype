@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WanType ワンタイプ - Japanese Typing Game</title>
+    <meta name="description" content="Type Japanese sentences for fun and proficiency!" />
+    <meta name="theme-color" content="#fbfaf6" />
+
+    <link data-trunk rel="rust" data-bin="wantype" data-wasm-opt="z" />
+    <link data-trunk rel="css" href="style.css" />
+    <!-- Copied, not hashed by Trunk, which drops `sizes` and `type`: a
+         browser without SVG icons takes the PNG. -->
+    <link data-trunk rel="copy-file" href="public/favicon.png" />
+    <link data-trunk rel="copy-file" href="public/favicon.svg" />
+    <link data-trunk rel="copy-file" href="public/apple-touch-icon.png" />
+    <link rel="icon" href="favicon.png" sizes="32x32" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link data-trunk rel="copy-dir" href="public/sentences" />
+    <link data-trunk rel="copy-file" href="../LICENSE.txt" />
+  </head>
+  <body class="loading"></body>
+</html>

@@ -1,0 +1,17 @@
+[package]
+name = "e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# End-to-end tests of the built site in a real browser. Only dev-dependencies:
+# nothing here is part of the app.
+
+[dev-dependencies]
+thiserror = "2"
+fantoccini = { version = "0.22", default-features = false }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

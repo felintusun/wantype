@@ -1,0 +1,998 @@
+/* WanType, written down a sheet of manuscript paper (原稿用紙, 縦書き).
+   Paper and ink, one vermilion (朱) for marks; untyped text is faint and
+   typed text full ink, as in a tracing workbook. Under the sentence a light
+   red rule, then the play row (helpers or the result; retry and next) and
+   the status row (options, voice, level and score). The controls are kept
+   small: the sentence is what the eye is for. */
+
+/* GENERIC */
+
+button {
+  appearance: none;
+  background-color: transparent;
+  border: none;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  color: inherit;
+  font: inherit;
+}
+kbd {
+  font: inherit;
+}
+select {
+  background-color: transparent;
+  margin: 0;
+  outline: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+a,
+label,
+button {
+  cursor: pointer;
+  user-select: none;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+em {
+  font-weight: bold;
+  font-style: inherit;
+}
+::selection {
+  background-color: var(--ink);
+  color: var(--paper);
+}
+
+/* FONTS: the reader's own Japanese system fonts, as most Japanese sites
+   do: Hiragino on macOS/iOS, Yu Gothic or Meiryo on Windows, Noto CJK on
+   Linux. Yu Gothic's regular weight renders too thin on Windows, so its
+   medium weight is aliased first (common practice). */
+
+@font-face {
+  font-family: 'Yu Gothic M';
+  src: local('Yu Gothic Medium'), local('YuGothic-Medium');
+}
+
+html {
+  --font-gothic: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic M',
+    'Yu Gothic', YuGothic, Meiryo, 'Noto Sans CJK JP', 'Noto Sans JP',
+    sans-serif;
+  --font-mincho: 'Hiragino Mincho ProN', 'Yu Mincho', YuMincho,
+    'Noto Serif CJK JP', 'Noto Serif JP', serif;
+}
+
+/* COLOURS: ink and paper. Untyped text is lighter than ink but keeps 4.5:1,
+   as it is what the player reads. */
+
+html {
+  --paper: #fbfaf6;
+  --ink: #1f1d1a;
+  --faint: #77736c;
+  --shu: #c8402a;
+  /* The manuscript paper's ruling, and the rule above the controls. */
+  --rule: #d98b7a;
+  --rule-light: rgba(217, 139, 122, 0.45);
+  /* A hover: a translucent vermilion wash on the paper. */
+  --wash: rgba(200, 64, 42, 0.06);
+  /* A wrong key: the flash of the square to type. */
+  --miss: #f4cbbf;
+
+  --background: var(--paper);
+  --text: var(--ink);
+  --text-2: #66625b;
+  --settings-border: #d8d5cf;
+  --settings-text: #4a4741;
+  --highlight: #eeece7;
+  --notice: #e4e1da;
+  --notice-text: #3d0f05;
+
+  /* A square of the sheet, as large as the window's height allows, and
+     the strip beside it for furigana. */
+  --cell: clamp(30px, calc((100vh - 330px) / 10), 42px);
+  --strip: 18px;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  height: 100vh;
+  display: grid;
+  justify-content: center;
+  align-items: center;
+  font-size: 16px;
+  color: var(--text);
+  background: var(--paper);
+  font-family: var(--font-gothic);
+}
+body.mincho #sentenceContainer {
+  font-family: var(--font-mincho);
+}
+
+main {
+  width: 840px;
+  height: min(600px, calc(100vh - 6em));
+  padding-inline: 3em;
+  padding-block: 2em;
+  /* The controls at the foot; the sentence above them, centred. */
+  display: grid;
+  align-content: end;
+  position: relative;
+  transition: opacity 300ms ease-in-out;
+}
+/* Shown once the fonts are ready: a fade, no slide. */
+body.loading main {
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* THE SENTENCE (`genko.rs`): squares in columns of ten, written down and
+   right to left (`writing-mode` turns the grid). Readings sit in the narrow
+   strip beside their squares; the key hint just left of the square to
+   type. */
+
+#sentenceContainer {
+  position: absolute;
+  /* Lifted a little so the sheet clears the rule above the controls. */
+  top: calc(50% - 90px);
+  left: 50%;
+  translate: -50% -50%;
+  width: fit-content;
+  font-size: 40px;
+  line-height: 1;
+  white-space: nowrap;
+  word-break: keep-all;
+  color: var(--text);
+}
+
+.genko-sheet {
+  border: 1.5px solid var(--rule);
+  width: max-content;
+  writing-mode: vertical-rl;
+}
+.genko-line {
+  display: grid;
+  grid-template-columns: repeat(var(--cells), var(--cell));
+  grid-template-rows: var(--strip) var(--cell);
+  grid-auto-columns: calc(var(--cell) / 2);
+}
+.genko-line + .genko-line {
+  border-block-start: 1px solid var(--rule);
+}
+.genko-reading {
+  grid-row: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  /* Shrunk when the reading is longer than its squares. */
+  font-size: min(13px, calc(var(--cell) * var(--span, 1) / var(--kana, 1)));
+  line-height: 1;
+  white-space: nowrap;
+}
+body:not(.furigana) .genko-reading {
+  visibility: hidden;
+}
+.genko-reading .todo {
+  color: var(--faint);
+}
+.genko-reading .done {
+  color: var(--text-2);
+}
+.genko-reading .active {
+  color: var(--shu);
+}
+.genko-square {
+  grid-row: 2;
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-block-start: 1px solid var(--rule);
+  font-size: calc(var(--cell) * 0.66);
+  line-height: 1;
+}
+.genko-square + .genko-square {
+  border-inline-start: 1px solid var(--rule);
+}
+/* A kanji group longer than a column runs past its end (none in the data
+   so far). */
+.genko-square.hang {
+  border: none;
+}
+.genko-square.todo {
+  color: var(--faint);
+}
+.genko-square.done {
+  color: var(--ink);
+}
+.genko-square.active {
+  box-shadow: inset 0 0 0 2px var(--shu);
+}
+/* A miss: a vermilion dot in the square's corner, kept once typed. */
+.genko-square.error::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--shu);
+}
+.genko-hint {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 100%;
+  translate: -2px -50%;
+  padding-inline: 2px;
+  background: var(--paper);
+  writing-mode: horizontal-tb;
+  font: bold 13px/1 var(--font-gothic);
+  color: var(--shu);
+}
+
+/* The translation: small, at the foot of the columns where reading them
+   ends, one empty column away so it reads as a note, not a line. */
+#translationElement {
+  position: absolute;
+  bottom: 0;
+  right: 100%;
+  margin-inline: 2.4em;
+  width: max-content;
+  max-width: 10em;
+  line-height: 1.3;
+  white-space: normal;
+  word-break: normal;
+  font-family: var(--font-gothic);
+  font-size: 40%;
+  color: var(--text-2);
+  transition: opacity 100ms ease-in-out;
+}
+body:not(.translation) #translationElement {
+  opacity: 0;
+}
+
+/* 無心, completed: only a seal with the score. */
+.seal {
+  position: absolute;
+  left: calc(50% - 170px);
+  top: 300px;
+  z-index: 2;
+  writing-mode: vertical-rl;
+  display: flex;
+  gap: 6px;
+  padding: 10px 7px;
+  border: 2px solid var(--shu);
+  border-radius: 4px;
+  color: var(--shu);
+  font-family: var(--font-mincho);
+  line-height: 1;
+  rotate: -4deg;
+  opacity: 0.88;
+}
+.seal-mark {
+  font-size: 24px;
+  letter-spacing: 0.1em;
+}
+.seal-score {
+  font-size: 13px;
+  letter-spacing: 0.05em;
+}
+
+/* BUTTONS, after Japanese product design systems (デジタル庁, SmartHR) and
+   kept out of the way: only the sentence and the square to type move.
+   Paper buttons drawn on a faint ruling, near-square like the sheet's
+   squares; nothing slides, grows or changes width (labels that change sit
+   in slots as wide as the widest); a hover lays a wash and darkens the
+   line, a press an inset. Japanese labels as verbs, the English legend
+   above, the key below. */
+
+.button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  padding-inline: 0.9em;
+  position: relative;
+  height: 2.2em;
+  border: 1px solid var(--rule-light);
+  border-radius: 2px;
+  background: var(--paper);
+  color: var(--text-2);
+  font-size: 12px;
+  font-kerning: normal;
+  font-feature-settings: 'palt';
+  transition: background 150ms, border-color 150ms, color 150ms, box-shadow 150ms;
+}
+/* Japanese labels at 14 px at least (デジタル庁), set a little apart. */
+.button [lang='ja'] {
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+/* A target of 44 px at least (デジタル庁), the button drawn smaller. */
+.button::after {
+  content: '';
+  position: absolute;
+  inset: -9px -4px;
+}
+.button:hover {
+  border-color: var(--rule);
+  background: var(--wash);
+  color: var(--ink);
+  /* Its legend and key over its neighbours'. */
+  z-index: 1;
+}
+.button:active {
+  box-shadow: inset 0 1px 2px rgba(31, 29, 26, 0.16);
+}
+/* The next sentence, once this one is done: a darker line, no more. */
+.button.ready {
+  border-color: var(--text-2);
+  color: var(--ink);
+}
+.button.compact {
+  height: 2em;
+}
+.icon-button {
+  width: 2.2em;
+  padding: 0;
+}
+.mark {
+  flex: none;
+}
+#voiceButton .wave {
+  opacity: 0;
+}
+#voiceButton.on .wave {
+  opacity: 1;
+}
+.inline-button {
+  color: var(--settings-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Toggles in the play and status rows: text buttons (no line until
+   hovered) whose box says the state. Off and faded helpers read lighter. */
+.button.helper {
+  border-color: transparent;
+  background: transparent;
+  padding-inline: 0.5em;
+}
+.button.helper:hover {
+  border-color: var(--rule-light);
+}
+.button.helper[aria-pressed='true'],
+#voiceButton.on {
+  color: var(--settings-text);
+}
+/* The box, a square of the sheet: vermilion with a maru (〇, "yes") when
+   on, empty when off, dashed when faded. */
+.box {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--faint);
+  border-radius: 1px;
+  color: var(--faint);
+}
+.button.helper[aria-pressed='true'] .box {
+  border-color: var(--shu);
+  background: var(--shu);
+  color: var(--paper);
+}
+.button.helper.faded .box {
+  border-style: dashed;
+}
+/* A slot as wide as the widest of its texts: whichever shows, nothing
+   moves. */
+.slot {
+  display: inline-grid;
+}
+.slot > * {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+.slot > .shown {
+  visibility: visible;
+}
+.button .note {
+  font-size: 11px;
+}
+
+.key,
+.legend {
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  text-align: center;
+  white-space: nowrap;
+  user-select: none;
+  color: var(--faint);
+}
+.legend {
+  bottom: 100%;
+  padding-block: 0.4em;
+  font-size: 10px;
+}
+.key {
+  top: 100%;
+  margin-block: -0.5em;
+  background-color: var(--paper);
+  padding: 0.3em 0.5em;
+  font-size: 10px;
+}
+
+/* THE CONTROLS */
+
+.controls {
+  /* Hovered buttons rise within the controls only. */
+  isolation: isolate;
+  display: grid;
+  row-gap: 1.8em;
+  font-size: 13px;
+  transition: opacity 400ms ease-in-out;
+}
+
+/* Rows of a fixed height: whatever they show, the rule and the rows below
+   stay where they are. */
+.play-row {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-top: 2px solid var(--rule-light);
+  padding-top: 26px;
+}
+.play-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.play-buttons,
+.offer {
+  display: flex;
+  gap: 10px;
+  flex: none;
+}
+.offer {
+  gap: 8px;
+}
+.play-buttons .button {
+  font-size: 13px;
+}
+
+.helpers {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.result-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.gain {
+  font-size: 20px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.headline {
+  font-size: 16px;
+  color: var(--text);
+}
+.sub {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.headline .sub {
+  margin-left: 0.5em;
+}
+.progress {
+  font-size: 12px;
+  color: var(--settings-text);
+}
+
+.status-row {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.tier {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 8px;
+}
+.tier-name {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text);
+}
+.tier-english {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.pips {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.pip {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 1.5px solid var(--settings-text);
+}
+.pip.full {
+  background: var(--settings-text);
+}
+.score {
+  margin-left: auto;
+  margin-right: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.score-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.chip {
+  padding: 3px 8px;
+  border-radius: 2px;
+  background: var(--highlight);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.aside {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The voice actor, over the 音声 button while a recording plays. */
+#sentenceVoiceContainer {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  translate: -50% 0;
+  margin-bottom: 0.3em;
+  padding-inline: 1em;
+  z-index: 2;
+  user-select: none;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  color: var(--settings-text);
+  font-size: 11px;
+  transition: opacity 300ms ease-in-out;
+}
+#sentenceVoiceContainer.hidden {
+  opacity: 0;
+}
+#sentenceVoiceContainer .speaker {
+  display: block;
+  flex: none;
+}
+#voiceButton .legend {
+  transition: opacity 300ms 150ms;
+}
+#voiceButton:has(#sentenceVoiceContainer:not(.hidden)) .legend {
+  opacity: 0;
+}
+
+/* STEPPING BACK (`step-back`): in Zen while a sentence is typed, and at
+   無心, the controls fade while the mouse rests. The mouse or keyboard
+   focus (Shift+Tab) brings them back. */
+
+body.step-back:not(.pointer) .controls:not(:has(:focus-visible)) {
+  opacity: 0;
+}
+body.step-back:not(.pointer) {
+  cursor: none;
+}
+
+/* SHEETS: the options, and the first run's choice of mode, over the card. */
+
+.sheet {
+  position: absolute;
+  inset: 0;
+  /* A short window scrolls the sheet inside its border. */
+  overflow-y: auto;
+  scrollbar-width: thin;
+  z-index: 5;
+  background: var(--background);
+  border: 1px solid var(--settings-border);
+  padding: 30px 48px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  font-size: 14px;
+}
+.sheet[hidden] {
+  display: none;
+}
+.sheet h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text);
+}
+.sheet h2 .faint {
+  font-size: 14px;
+}
+.faint {
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Japanese in the controls, sheets and the framed notice: a little apart
+   (デジタル庁: 2%). */
+.controls :lang(ja),
+.sheet :lang(ja),
+.framed :lang(ja) {
+  letter-spacing: 0.02em;
+}
+.aside.unseen {
+  visibility: hidden;
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sheet-head .button {
+  font-size: 14px;
+}
+.sheet-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+  color: var(--text);
+}
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* Headings: Japanese first, then the English, smaller; weight, not
+   capitals and tracking. */
+.group-title {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.group-title > [lang='ja'] {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.group-title:not(:first-child) {
+  margin-top: 6px;
+}
+.group-subtitle {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.group-subtitle > [lang='ja'] {
+  font-size: 14px;
+  color: var(--text);
+}
+.choice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.choice input {
+  accent-color: var(--shu);
+  margin: 3px 0 0;
+}
+/* Checkboxes as the toggles' box: a maru when on, not a ✓. */
+.choice input[type='checkbox'] {
+  appearance: none;
+  flex: none;
+  display: grid;
+  place-content: center;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--faint);
+  border-radius: 1px;
+  background: var(--paper);
+}
+.choice input[type='checkbox']:checked {
+  border-color: var(--shu);
+  background: var(--shu);
+}
+.choice input[type='checkbox']:checked::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--paper);
+  border-radius: 50%;
+}
+.tier-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 22px;
+  margin-top: 2px;
+}
+.tier-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.tier-row .faint {
+  font-size: 12px;
+}
+.tier-row.current {
+  background: var(--highlight);
+}
+/* The row is the radio button; its input stays focusable. */
+.tier-row input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.select-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.select-row select {
+  max-width: 11em;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 4px 6px;
+}
+
+.links {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 1em;
+  padding-top: 14px;
+  border-top: 1px solid var(--settings-border);
+}
+.links .button {
+  font-size: 13px;
+  height: 2.4em;
+}
+.links a:not([href]) {
+  visibility: hidden;
+}
+.links .bold {
+  font-weight: bold;
+  padding-inline: 0.2em;
+}
+#logo {
+  font-size: 1.4em;
+  color: var(--settings-text);
+  font-family: 'Courier New', Courier, monospace;
+}
+#sentenceOriginLink {
+  margin-left: auto;
+}
+.credits {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--faint);
+}
+.credits a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--rule-light);
+  text-underline-offset: 0.2em;
+}
+.credits a:hover {
+  color: var(--settings-text);
+}
+/* Pochi, the link to the source: ink at rest like the logo, darker on
+   hover; a 44 px target. */
+.pochi {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-block: -10px;
+  color: var(--text-2);
+}
+.pochi:hover {
+  color: var(--text);
+}
+.pochi .sparkle {
+  fill: var(--shu);
+}
+#logo .faint {
+  font-family: var(--font-gothic);
+  font-size: 13px;
+  margin-inline-start: 0.3em;
+}
+
+.welcome {
+  padding: 46px 64px 30px;
+  gap: 28px;
+}
+.welcome-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.welcome-head h2 {
+  font-size: 28px;
+}
+.welcome-head .faint {
+  font-size: 15px;
+}
+.welcome-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.welcome-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  text-align: left;
+  padding: 26px 28px 30px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--background);
+  color: var(--text);
+}
+.welcome-card:hover {
+  border-color: var(--shu);
+  background: var(--wash);
+}
+.welcome-card .faint {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.welcome-mark {
+  font-size: 44px;
+  line-height: 1;
+  font-family: var(--font-mincho);
+  color: var(--ink);
+}
+.welcome-mark.shu {
+  color: var(--shu);
+}
+.welcome-title {
+  font-size: 18px;
+}
+.welcome-path {
+  font-size: 14px;
+  color: var(--settings-text);
+  letter-spacing: 0.04em;
+}
+.welcome-foot {
+  margin-top: auto;
+}
+
+/* NOTICES: keys go to a Japanese IME instead of the game; how to type a
+   kana that a key spelled by its sound. */
+
+.notice {
+  position: absolute;
+  top: 0.3em;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1em;
+  padding: 0.5em 1.2em;
+  border-radius: 1em;
+  background: var(--notice);
+  color: var(--notice-text);
+  font-size: 14px;
+  white-space: nowrap;
+  transition: opacity 200ms ease-in-out;
+}
+.notice.hidden {
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* KEYBOARD FOCUS: Shift+Tab moves into the controls, Escape returns to the
+   game (Tab itself toggles furigana). */
+
+.button:focus-visible,
+.inline-button:focus-visible,
+.welcome-card:focus-visible,
+select:focus-visible,
+.choice:has(input:focus-visible),
+.tier-row:has(input:focus-visible) {
+  outline: 2px solid var(--settings-text);
+  outline-offset: 2px;
+}
+
+/* MOBILE: the game needs a keyboard. */
+
+.description {
+  display: none;
+  margin-bottom: 1em;
+  line-height: 1.5em;
+}
+@media (max-width: 850px) {
+  main {
+    width: auto;
+    height: auto;
+  }
+  .description {
+    display: block;
+  }
+  #sentenceContainer,
+  .controls,
+  .seal,
+  .sheet {
+    display: none;
+  }
+}
+
+/* FRAMED: inside another page the game does not run (`Framed`); a link
+   opens it on its own. */
+
+.framed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  text-align: center;
+}
+.framed p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+/* REDUCED MOTION: no slides; state changes stay. */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before {
+    animation: none !important;
+    transition-duration: 0ms !important;
+  }
+}

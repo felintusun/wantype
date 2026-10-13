@@ -1,0 +1,6 @@
+/target
+/.tools
+/dist
+/app/dist
+# Sentence data built by `cargo xtask data` (downloads in target/tatoeba)
+/app/public/sentences
