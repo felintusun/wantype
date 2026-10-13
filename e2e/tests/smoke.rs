@@ -454,3 +454,48 @@ async fn refuses_to_run_in_a_frame() -> E2eResult {
     screenshot(&client, &out_dir("smoke")?, "framed").await?;
     close(client).await
 }
+
+/// Tablets play too, a keyboard of their own being up to the player: in
+/// portrait the card narrows to the window with nothing cut off. Only a
+/// phone gets the note instead.
+#[tokio::test]
+#[ignore]
+async fn fits_a_tablet() -> E2eResult {
+    let out = out_dir("smoke")?;
+    let (client, _driver, port) = launch(ENGLISH).await?;
+    // Which layout shows: the keyboard one (`main`) or the phone's.
+    let layout = "['main', '.phone'] \
+        .filter(s => getComputedStyle(document.querySelector(s)).display !== 'none')";
+    // What leaves the window, or a row too narrow for what it holds.
+    let cut_off = "(() => { \
+        const name = e => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') \
+          + [...e.classList].map(c => '.' + c).join(''); \
+        const out = [...document.querySelectorAll('main, main *')].filter(e => { \
+          const r = e.getBoundingClientRect(); \
+          return r.width > 0 && (r.left < 0 || r.right > innerWidth) }); \
+        const tight = [...document.querySelectorAll('.play-row, .status-row, .welcome-cards')] \
+          .flatMap(row => { \
+            const r = row.getBoundingClientRect(); \
+            return [...row.querySelectorAll('*')].filter(e => { \
+              const c = e.getBoundingClientRect(); \
+              return c.width > 0 && (c.left < r.left - 0.5 || c.right > r.right + 0.5) }) }); \
+        return [...out, ...tight].map(name) })()";
+    for (width, height, name) in [(600, 960, "tablet-600"), (768, 1024, "tablet-768")] {
+        resize(&client, width, height).await?;
+        visit(&client, port).await?;
+        assert_eq!(js(&client, layout).await?, json!(["main"]), "{name}");
+        screenshot(&client, &out, &format!("{name}-welcome")).await?;
+        let cut = js(&client, cut_off).await?;
+        assert_eq!(cut, json!([]), "{name}: the choice cut off");
+        reload_with(&client, json!({ "mode": "score" })).await?;
+        screenshot(&client, &out, name).await?;
+        let cut = js(&client, cut_off).await?;
+        assert_eq!(cut, json!([]), "{name}: the game cut off");
+        js(&client, "(localStorage.clear(), true)").await?;
+    }
+    resize(&client, 390, 844).await?;
+    visit(&client, port).await?;
+    assert_eq!(js(&client, layout).await?, json!([".phone"]), "a phone");
+    screenshot(&client, &out, "phone").await?;
+    close(client).await
+}

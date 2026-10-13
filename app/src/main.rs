@@ -13,6 +13,7 @@
 mod data;
 mod genko;
 mod js;
+mod mobile;
 mod text;
 
 use std::sync::Arc;
@@ -1054,14 +1055,6 @@ fn Game() -> impl IntoView {
 
     view! {
         <main>
-            <div class="description">
-                <em>"WanType"</em> " is a simple web-based " <em>"Japanese typing game"</em>
-                " featuring thousands of sentences from Tatoeba, including furigana, "
-                "translation in many languages and recordings from native speakers."
-                <br /><br />
-                "If you're on mobile, switch to a computer to get started!"
-            </div>
-
             <div id="imeNotice" class="notice" role="status" class:hidden=move || !app.ime_on.get()>
                 <span lang="ja">"日本語入力がオンです。半角英数に切り替えてください"</span>
                 <span lang="en">"Japanese input (IME) is on: switch to direct input"</span>
@@ -1478,7 +1471,9 @@ fn Welcome(app: App) -> impl IntoView {
                         "Helpers fade as you get better and come back after a rough patch. "
                         "Score, streak and a multiplier."
                     </span>
-                    <span lang="ja" class="welcome-path">"入門 → 初級 → 中級 → 上級"</span>
+                    // No-break spaces before the separators: a line may end
+                    // with one, never start with one (行頭禁則).
+                    <span lang="ja" class="welcome-path">"入門\u{a0}→ 初級\u{a0}→ 中級\u{a0}→ 上級"</span>
                     <kbd class="key">"1"</kbd>
                 </button>
                 <button type="button" class="welcome-card" on:click=move |_| app.dispatch(Event::SetMode(Mode::Zen))>
@@ -1488,7 +1483,7 @@ fn Welcome(app: App) -> impl IntoView {
                         "Just type. No score, no levels. Helpers stay exactly as you set them, "
                         "and the controls step back while you type."
                     </span>
-                    <span lang="ja" class="welcome-path">"ふりがな · 翻訳 · ヒント · 音声"</span>
+                    <span lang="ja" class="welcome-path">"ふりがな\u{a0}· 翻訳\u{a0}· ヒント\u{a0}· 音声"</span>
                     <kbd class="key">"2"</kbd>
                 </button>
             </div>
@@ -1503,7 +1498,8 @@ fn main() {
         show_page();
         leptos::mount::mount_to_body(Framed);
     } else {
-        leptos::mount::mount_to_body(Game);
+        // Both layouts; the stylesheets show the one for the screen.
+        leptos::mount::mount_to_body(|| view! { <Game /> <mobile::Phone /> });
     }
 }
 

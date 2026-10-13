@@ -3,7 +3,10 @@
    typed text full ink, as in a tracing workbook. Under the sentence a light
    red rule, then the play row (helpers or the result; retry and next) and
    the status row (options, voice, level and score). The controls are kept
-   small: the sentence is what the eye is for. */
+   small: the sentence is what the eye is for.
+
+   This is the keyboard layout, for desktops and tablets; phones have their
+   own in `mobile.css`, which comes after it and hides this one. */
 
 /* GENERIC */
 
@@ -113,9 +116,11 @@ body.mincho #sentenceContainer {
 }
 
 main {
-  width: 840px;
+  /* As wide as a tablet in portrait allows, its margins narrowing too. */
+  --gutter: clamp(1.5em, 5vw, 3em);
+  width: min(840px, 100vw - 2 * var(--gutter));
   height: min(600px, calc(100vh - 6em));
-  padding-inline: 3em;
+  padding-inline: var(--gutter);
   padding-block: 2em;
   /* The controls at the foot; the sentence above them, centred. */
   display: grid;
@@ -903,6 +908,9 @@ body.step-back:not(.pointer) {
   font-size: 14px;
   color: var(--settings-text);
   letter-spacing: 0.04em;
+  /* On a narrow card, lines break between the words, never inside 上級. */
+  word-break: keep-all;
+  text-wrap: balance;
 }
 .welcome-foot {
   margin-top: auto;
@@ -945,29 +953,6 @@ select:focus-visible,
 .tier-row:has(input:focus-visible) {
   outline: 2px solid var(--settings-text);
   outline-offset: 2px;
-}
-
-/* MOBILE: the game needs a keyboard. */
-
-.description {
-  display: none;
-  margin-bottom: 1em;
-  line-height: 1.5em;
-}
-@media (max-width: 850px) {
-  main {
-    width: auto;
-    height: auto;
-  }
-  .description {
-    display: block;
-  }
-  #sentenceContainer,
-  .controls,
-  .seal,
-  .sheet {
-    display: none;
-  }
 }
 
 /* FRAMED: inside another page the game does not run (`Framed`); a link

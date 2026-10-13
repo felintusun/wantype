@@ -1,0 +1,20 @@
+/* WanType on a phone (`mobile.rs`), apart from the keyboard layout
+   (`style.css`) that desktops and tablets play, whatever keyboard their
+   players bring. A phone's own keyboard sends no keys: for now it gets a
+   note instead of the game. The colours and fonts are `style.css`'s. */
+
+.phone {
+  display: none;
+}
+
+@media (max-width: 599px) {
+  main {
+    display: none;
+  }
+  .phone {
+    display: block;
+    max-width: 32em;
+    margin-inline: 1.5em;
+    line-height: 1.7;
+  }
+}

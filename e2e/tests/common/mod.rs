@@ -420,14 +420,27 @@ pub fn out_dir(name: &str) -> E2eResult<PathBuf> {
 /// [`open`], in a browser preferring `languages`.
 pub async fn open_with_languages(languages: &str) -> E2eResult<(Client, Driver)> {
     let (client, driver, port) = launch(languages).await?;
-    goto(&client, &format!("http://127.0.0.1:{port}{BASE}")).await?;
+    visit(&client, port).await?;
+    Ok((client, driver))
+}
+
+/// Open the site served on `port` and wait until it shows.
+pub async fn visit(client: &Client, port: u16) -> E2eResult {
+    goto(client, &format!("http://127.0.0.1:{port}{BASE}")).await?;
     wait_for(
-        &client,
+        client,
         "the page",
         "!document.body.classList.contains('loading')",
     )
-    .await?;
-    Ok((client, driver))
+    .await
+}
+
+/// The window resized to `width`×`height`.
+pub async fn resize(client: &Client, width: u32, height: u32) -> E2eResult {
+    client
+        .set_window_size(width, height)
+        .await
+        .map_err(browser(format!("sizing the window to {width}×{height}")))
 }
 
 /// The release build served, and headless Firefox at 1100×700 preferring
@@ -448,10 +461,7 @@ pub async fn launch(languages: &str) -> E2eResult<(Client, Driver, u16)> {
             .map_err(E2eError::Spawn)?,
     );
     let client = connect(driver_port, languages).await?;
-    client
-        .set_window_size(1100, 700)
-        .await
-        .map_err(browser("sizing the window"))?;
+    resize(&client, 1100, 700).await?;
     Ok((client, driver, port))
 }
 
