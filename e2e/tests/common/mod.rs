@@ -257,24 +257,23 @@ pub async fn press(client: &Client, keys: &str) -> E2eResult {
         .await
         .map_err(browser(format!("pressing {keys:?}")))
 }
+/// The next key to type, shown as the hint or not; `""` once completed.
+const NEXT_KEY: &str = "document.getElementById('sentenceContainer').dataset.next";
+/// [`NEXT_KEY`], or `null` once the square to type holds `arguments[0]`.
+const NEXT_KEY_TO: &str =
+    "document.querySelector('.genko-square.active')?.firstChild?.nodeValue === arguments[0] \
+     ? null : document.getElementById('sentenceContainer').dataset.next";
 
 /// The next key to type, shown as the hint or not.
 pub async fn next_key(client: &Client) -> E2eResult<String> {
-    js_str(
-        client,
-        "document.getElementById('sentenceContainer').dataset.next",
-    )
-    .await
+    js_str(client, NEXT_KEY).await
 }
 
-/// Type the next key until `done` (a JS condition, given `args`) holds:
-/// whether it did before the sentence ended. One script per key gives the
-/// next key, or `null` once `done`.
-async fn type_until(client: &Client, done: &str, args: &[serde_json::Value]) -> E2eResult<bool> {
-    let step =
-        format!("({done}) ? null : document.getElementById('sentenceContainer').dataset.next");
+/// Type the keys `step` (a script, given `args`) gives, one script per key,
+/// until it gives `null`: whether it did before the sentence ended.
+async fn type_until(client: &Client, step: &str, args: &[serde_json::Value]) -> E2eResult<bool> {
     for _ in 0..500 {
-        match js_with(client, &step, args).await? {
+        match js_with(client, step, args).await? {
             serde_json::Value::Null => return Ok(true),
             serde_json::Value::String(key) if !key.is_empty() => press(client, &key).await?,
             _ => return Ok(false),
@@ -285,14 +284,11 @@ async fn type_until(client: &Client, done: &str, args: &[serde_json::Value]) -> 
 
 /// Type the next key until the square to type holds `ch`.
 pub async fn type_to(client: &Client, ch: char) -> E2eResult {
-    let at =
-        "document.querySelector('.genko-square.active')?.firstChild?.nodeValue === arguments[0]";
-    match type_until(client, at, &[json!(ch.to_string())]).await? {
+    match type_until(client, NEXT_KEY_TO, &[json!(ch.to_string())]).await? {
         true => Ok(()),
         false => Err(E2eError::NotReached(ch)),
     }
 }
-
 /// Type the next `n` keys, or up to the end of the sentence.
 pub async fn type_keys(client: &Client, n: usize) -> E2eResult {
     for _ in 0..n {
@@ -307,7 +303,7 @@ pub async fn type_keys(client: &Client, n: usize) -> E2eResult {
 
 /// Type the next key until the sentence is complete.
 pub async fn type_sentence(client: &Client) -> E2eResult {
-    type_until(client, "false", &[]).await?;
+    type_until(client, NEXT_KEY, &[]).await?;
     let class = js_str(
         client,
         "document.getElementById('sentenceContainer').className",

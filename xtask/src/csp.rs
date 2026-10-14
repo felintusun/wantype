@@ -38,6 +38,12 @@ pub fn csp() -> Result<(), Error> {
     Ok(at(&page, fs::write(&page, with_policy(&html)?))?)
 }
 
+/// The policy's tag, before and after the policy ([`policy`]).
+const META: [&str; 2] = [
+    "\n    <meta http-equiv=\"Content-Security-Policy\" content=\"",
+    "\" />",
+];
+
 /// Everything the page loads, and nothing else:
 /// - scripts: its own, wasm, and Trunk's inline loader by hash;
 /// - the sentence data from its own origin; styles and images likewise
@@ -94,11 +100,8 @@ fn with_policy(html: &str) -> Result<String, Error> {
         rest = &rest[end..];
     }
     let head = html.find("<head>").ok_or(Error::NoHead)? + "<head>".len();
-    let meta = format!(
-        "\n    <meta http-equiv=\"Content-Security-Policy\" content=\"{}\" />",
-        policy(&inline)
-    );
-    Ok([&html[..head], &meta, &html[head..]].concat())
+    let [open, close] = META;
+    Ok([&html[..head], open, &policy(&inline), close, &html[head..]].concat())
 }
 
 #[cfg(test)]

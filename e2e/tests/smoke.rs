@@ -38,6 +38,17 @@ const CONTROLS_SHOWN: &str =
 const OPTIONS_CLOSED: &str = "document.querySelector('.options').hidden";
 const OPTIONS_OPEN: &str = "!document.querySelector('.options').hidden";
 
+/// The phone's lens shows the whole sentence as a page.
+const PAGED: &str = "document.querySelector('.lens.page') !== null";
+/// Every square of the sentence lies within the lens.
+const WHOLE: &str = "(lens => { \
+    const b = lens.getBoundingClientRect(); \
+    return [...lens.querySelectorAll('.genko-square')].every(s => { \
+      const r = s.getBoundingClientRect(); \
+      return r.top >= b.top - 0.5 && r.bottom <= b.bottom + 0.5 \
+        && r.left >= b.left - 0.5 && r.right <= b.right + 0.5 }) \
+  })(document.querySelector('.lens'))";
+
 /// What in `arguments[0]` (a selector) leaves the window, or sticks out of
 /// a row too narrow for what it holds, by name.
 const CUT_OFF: &str = "(root => { \
@@ -562,6 +573,18 @@ async fn plays_on_a_phone() -> E2eResult {
             resize(&client, 500, 900).await?;
             wait_for_with(&client, "the phone layout", LAYOUT, &[json!(".phone")]).await?;
             assert_eq!(js_str(&client, at).await?, "5", "the place kept");
+            // A tap on the lens shows the whole sentence, on a page within
+            // it; the next flick brings the lens back.
+            touch(&client, ".lens-toggle", 0.0, 0.0).await?;
+            wait_for(&client, "the page", PAGED).await?;
+            let columns = "document.querySelectorAll('.lens .genko-line').length";
+            let columns = js(&client, columns).await?.as_u64();
+            assert!(columns > Some(1), "the page in {columns:?} columns");
+            assert!(js_bool(&client, WHOLE).await?, "the page cut off");
+            screenshot(&client, &out, "phone-page").await?;
+        }
+        if flicks == 7 {
+            assert!(!js_bool(&client, PAGED).await?, "the page stayed");
         }
         assert!(flicks < 40, "the hints went round in circles");
     }
@@ -579,6 +602,15 @@ async fn plays_on_a_phone() -> E2eResult {
     screenshot(&client, &out, "phone-options").await?;
     click(&client, ".options .sheet-head .button").await?;
     wait_for(&client, "the options to close", OPTIONS_CLOSED).await?;
+
+    // The next sentence comes through the lens, not on the page.
+    touch(&client, ".lens-toggle", 0.0, 0.0).await?;
+    wait_for(&client, "the page", PAGED).await?;
+    click(&client, ".phone-bar .ready").await?;
+    assert!(
+        !js_bool(&client, PAGED).await?,
+        "the next sentence on the page"
+    );
     assert_eq!(js(&client, "blocked").await?, json!([]), "CSP violations");
     close(client).await
 }

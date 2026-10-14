@@ -156,6 +156,33 @@ pub fn squares(segments: &[Segment]) -> usize {
     segments.iter().map(width_of).sum()
 }
 
+/// The sheet's border, and the rule between its columns (`.genko-sheet`,
+/// `.genko-line`), in CSS pixels.
+const BORDER: f64 = 1.5;
+const RULE: f64 = 1.0;
+
+/// Squares per column for a page of all of `segments` in `height` ×
+/// `width` CSS pixels: the count whose squares come out largest, up to
+/// `cell`, each column with its strip of readings `strip` wide beside a
+/// `cell`; of counts alike, the fewest columns. Only the count: the CSS
+/// sizes the squares to the lens (`.lens.page`), so the page fits whatever
+/// this estimate says.
+pub fn page(segments: &[Segment], height: f64, width: f64, cell: f64, strip: f64) -> usize {
+    let size = |squares: usize| {
+        let columns = lines(segments, squares).len() as f64;
+        let tall = (height - 2.0 * BORDER) / squares as f64;
+        let wide = (width - 2.0 * BORDER - columns * RULE) / (columns * (1.0 + strip / cell));
+        cell.min(tall).min(wide)
+    };
+    // No column shorter than a kanji group, which would hang past it; the
+    // last of the largest, the longest columns.
+    let group = segments.iter().map(width_of).max().unwrap_or(1);
+    (group..=squares(segments).max(group))
+        .map(|squares| (squares, size(squares)))
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map_or(group, |(squares, _)| squares)
+}
+
 /// The first square of the segment being typed; past the last once all
 /// are typed.
 pub fn active_square(segments: &[Segment]) -> usize {
@@ -207,6 +234,7 @@ pub fn view(
     segments: Memo<Vec<Segment>>,
     hint: Signal<Option<char>>,
 ) -> impl IntoView {
+    let count = lines.len();
     let lines = lines
         .into_iter()
         .map(|line| {
@@ -283,7 +311,11 @@ pub fn view(
             view! { <div class="genko-line">{readings}{squares}</div> }
         })
         .collect_view();
-    view! { <div class="genko-sheet" style:--cells=width.to_string()>{lines}</div> }
+    view! {
+        <div class="genko-sheet" style:--cells=width.to_string() style:--lines=count.to_string()>
+            {lines}
+        </div>
+    }
 }
 
 #[cfg(test)]
@@ -306,6 +338,34 @@ mod tests {
 
     fn text(line: &Line) -> String {
         line.squares.iter().map(|s| s.ch.unwrap_or('□')).collect()
+    }
+
+    #[test]
+    fn a_page_keeps_full_squares_in_the_longest_columns() -> Result<(), ParseError> {
+        let (_, short) = layout("これは[日本|にほん]です。", 0, 99)?;
+        // Seven squares of 52 px fill a 400 px column; fewer would not be
+        // larger, only more columns.
+        assert_eq!(page(&short, 400.0, 300.0, 52.0, 20.0), 7);
+        Ok(())
+    }
+
+    #[test]
+    fn a_page_column_holds_its_longest_kanji_group() -> Result<(), ParseError> {
+        let (_, sentence) = layout("[大丈夫|だいじょうぶ]です。", 0, 99)?;
+        // A low, wide page would take columns of one or two squares; 大丈夫
+        // stays in one column of three.
+        assert_eq!(page(&sentence, 100.0, 600.0, 52.0, 20.0), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn a_long_page_balances_its_columns() -> Result<(), ParseError> {
+        let (_, long) = layout(&"あいうえおかきくけこ".repeat(6), 0, 99)?;
+        // Sixty kana on a square page: seven columns of nine take squares
+        // of 30 px; six of ten 29.7 px (too tall), eight of eight 26 px
+        // (too wide).
+        assert_eq!(page(&long, 300.0, 300.0, 52.0, 20.0), 9);
+        Ok(())
     }
 
     #[test]

@@ -16,8 +16,10 @@
   grid-template-rows: 44px 1fr auto auto;
   gap: 12px;
   padding: 12px 12px max(12px, env(safe-area-inset-bottom));
-  /* The squares, larger than on the card: the lens shows few. */
-  --cell: 52px;
+  /* The squares, larger than on the card: the lens shows few. As
+     `mobile.rs` has them. */
+  --square: 52px;
+  --cell: var(--square);
   --strip: 20px;
   /* The row of the lens the square to type is held at. */
   --lens-row: 2;
@@ -45,6 +47,8 @@ body.loading .phone {
   display: grid;
   justify-content: center;
   align-content: start;
+  /* The page sizes its squares to the lens (`cqh`, `cqw`). */
+  container-type: size;
   line-height: 1;
   mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
 }
@@ -64,9 +68,45 @@ body.loading .phone {
   color: var(--shu);
 }
 
-/* The translation's row keeps its height when it is off. */
+/* Tapped, the lens shows the whole sentence as a page of columns, right
+   to left, its squares as large as fit (`genko::page`); tapped again, or
+   a flick, and the lens is back. The page stands still. */
+.lens.page {
+  align-content: center;
+  mask-image: none;
+}
+/* Squares as large as fit the lens, up to the lens's own: --cells to a
+   column (`genko::page`), --lines columns, each with its strip and the
+   1 px rule beside it, inside the 1.5 px border. */
+.lens.page .genko-sheet {
+  --cell: min(
+    var(--square),
+    (100cqh - 3px) / var(--cells),
+    (100cqw - 3px - var(--lines) * 1px) / (var(--lines) * 18 / 13)
+  );
+  --strip: calc(var(--cell) * 5 / 13);
+  translate: none;
+  transition: none;
+}
+.lens.page .lens-held {
+  visibility: hidden;
+}
+.lens-toggle {
+  position: absolute;
+  inset: 0;
+  cursor: zoom-in;
+}
+.lens.page .lens-toggle {
+  cursor: zoom-out;
+}
+
+/* Three lines, whatever the translation: the lens above never changes
+   size with it, nor when it is off. A longer one (up to 200 chars)
+   scrolls in its row. */
 .phone-translation {
-  min-height: 3.4em;
+  height: 5.1em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   font-size: 15px;
   line-height: 1.7;
   text-align: center;
@@ -89,14 +129,15 @@ body:not(.translation) .phone-translation {
 }
 .pad-key {
   position: relative;
-  height: 56px;
+  height: 64px;
   border: 1px solid var(--settings-border);
   border-radius: 6px;
   background: var(--paper);
 }
 .pad-char {
   position: absolute;
-  font-size: 11px;
+  /* Japanese at 14 px at least, as everywhere. */
+  font-size: 14px;
   line-height: 1;
   color: var(--faint);
 }
