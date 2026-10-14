@@ -310,6 +310,9 @@ struct Shown {
     settings: Memo<Settings>,
     helpers: Memo<Helpers>,
     completed: Memo<bool>,
+    /// Playing for score (levels), not Zen.
+    scoring: Memo<bool>,
+    numbers: Memo<Numbers>,
     /// The translation shown, in the chosen language or else in English;
     /// `None` without a translation in either.
     translation: Memo<Option<ShownTranslation>>,
@@ -344,6 +347,10 @@ impl Shown {
             settings,
             helpers: Memo::new(move |_| session.with(Session::helpers)),
             completed: Memo::new(move |_| session.with(Session::completed)),
+            scoring: Memo::new(move |_| session.with(Session::scoring)),
+            numbers: Memo::new(move |_| Numbers {
+                kanji: session.with(Session::kanji_numerals),
+            }),
             translation,
         }
     }
@@ -809,7 +816,6 @@ fn Game(
     app: App,
 ) -> impl IntoView {
     let session = app.session;
-    let languages = app.languages;
 
     let listener = window_event_listener(ev::keydown, move |e| app.on_keydown(e));
     on_cleanup(move || listener.remove());
@@ -823,17 +829,15 @@ fn Game(
         settings,
         helpers: shown,
         completed,
+        scoring,
+        numbers,
         ..
     } = app.view;
     let stats = Memo::new(move |_| session.with(Session::stats));
     let outcome = Memo::new(move |_| session.with(|s| s.outcome().cloned()));
-    let scoring = Memo::new(move |_| session.with(Session::scoring));
     let multiplier = Memo::new(move |_| session.with(Session::multiplier));
     let fade_pending = Memo::new(move |_| session.with(Session::fade_pending));
     let tier = Memo::new(move |_| settings.with(|s| s.ladder.tier));
-    let numbers = Memo::new(move |_| Numbers {
-        kanji: session.with(Session::kanji_numerals),
-    });
     let panel = Memo::new(move |_| outcome.with(|o| panel(o.as_ref())));
     // The interface thins as the player climbs: English labels and live
     // stats go at 中級, helpers that faded and stayed off at 上級, and at
@@ -872,7 +876,6 @@ fn Game(
     let next_key = move || session.with(|s| s.hint().map(String::from).unwrap_or_default());
     let translation = app.view.translation_text();
     let translation_lang = app.view.translation_lang();
-    let tatoeba_id = move || sentence.with(|s| s.as_ref().and_then(|s| s.id));
     let refs = app.refs;
 
     let stats_text = move || {
@@ -1189,21 +1192,7 @@ fn Game(
                 </div>
 
                 <div class="status-row">
-                    <button
-                        id="optionsButton"
-                        type="button"
-                        class="button icon-button"
-                        aria-label="Options"
-                        aria-haspopup="dialog"
-                        on:click=move |_| app.open_options(true)
-                    >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-                            <path d="M4 7h9M17 7h3M4 17h3M11 17h9"></path>
-                            <circle cx="15" cy="7" r="2"></circle>
-                            <circle cx="9" cy="17" r="2"></circle>
-                        </svg>
-                    </button>
+                    <OptionsButton app />
                     <button
                         id="voiceButton"
                         type="button"
@@ -1246,7 +1235,7 @@ fn Game(
                 </div>
             </div>
 
-            <Options app settings scoring numbers languages tatoeba_id=Signal::derive(tatoeba_id) />
+            <Options app />
             <Welcome app />
         </main>
     }
@@ -1267,16 +1256,45 @@ const NEW_KANJI: &[(Option<u8>, &str, &str)] = &[
     (None, "any", "Any"),
 ];
 
+/// The button that opens the options sheet ([`Options`]), in either layout.
+#[component]
+fn OptionsButton(
+    /// The game, which outlives the layout showing it ([`Layout`]).
+    app: App,
+) -> impl IntoView {
+    view! {
+        <button
+            id="optionsButton"
+            type="button"
+            class="button icon-button"
+            aria-label="Options"
+            aria-haspopup="dialog"
+            on:click=move |_| app.open_options(true)
+        >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                <path d="M4 7h9M17 7h3M4 17h3M11 17h9"></path>
+                <circle cx="15" cy="7" r="2"></circle>
+                <circle cx="9" cy="17" r="2"></circle>
+            </svg>
+        </button>
+    }
+}
+
 /// The options sheet: progress, helpers, display and play.
 #[component]
 fn Options(
+    /// The game, which outlives the layout showing it ([`Layout`]).
     app: App,
-    settings: Memo<Settings>,
-    scoring: Memo<bool>,
-    numbers: Memo<Numbers>,
-    languages: RwSignal<Result<Vec<Language>, Arc<data::DataError>>>,
-    tatoeba_id: Signal<Option<SentenceId>>,
 ) -> impl IntoView {
+    let Shown {
+        sentence,
+        settings,
+        scoring,
+        numbers,
+        ..
+    } = app.view;
+    let languages = app.languages;
     let session = app.session;
     let zen = move || settings.with(|s| s.mode == Some(Mode::Zen));
     let fixed = move || settings.with(|s| s.ladder.fixed);
@@ -1344,7 +1362,7 @@ fn Options(
 
     view! {
         <div
-            class="sheet"
+            class="sheet options"
             role="dialog"
             aria-modal="true"
             aria-labelledby="optionsTitle"
@@ -1478,7 +1496,7 @@ fn Options(
                     id="sentenceOriginLink"
                     class="button"
                     target="_blank"
-                    href=move || tatoeba_id.get().map(SentenceId::url)
+                    href=move || sentence.with(|s| s.as_ref().and_then(|s| s.id).map(SentenceId::url))
                 >
                     <span>"この文を" <span class="bold">"Tatoeba"</span> "で見る"</span>
                 </a>

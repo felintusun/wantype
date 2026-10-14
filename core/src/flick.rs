@@ -175,7 +175,8 @@ fn turns(kana: char) -> impl Iterator<Item = char> + Clone {
 
 /// Whether ゛゜小 turns `kana` into `to` (or it is `to` already).
 fn turns_into(kana: char, to: char) -> bool {
-    // A lookup, not a scan of [`turns`]: hints ask for every key.
+    // As [`turns`] has it (a test checks), looked up rather than scanned:
+    // hints ask it of every key.
     to == kana || small(kana) == Some(to) || split_voiced(to).is_some_and(|(base, _)| base == kana)
 }
 
@@ -354,6 +355,17 @@ mod tests {
         // types nothing.
         assert_eq!(c.input(Gesture::TURN, Some('か')), "゛");
         assert_eq!(c.input(Pad::Wa.flick(Flick::Down), Some('か')), "");
+    }
+
+    #[test]
+    fn the_lookup_agrees_with_the_turns() {
+        let kana = PAD.iter().flat_map(|pad| pad.chars()).flatten();
+        for kana in kana {
+            for to in 'ぁ'..='ゖ' {
+                let turns = turns(kana).any(|k| k == to);
+                assert_eq!(turns_into(kana, to), turns, "{kana} → {to}");
+            }
+        }
     }
 
     #[test]

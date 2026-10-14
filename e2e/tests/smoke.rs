@@ -34,6 +34,26 @@ const CONTROLS_FADED: &str =
 const CONTROLS_SHOWN: &str =
     "getComputedStyle(document.querySelector('.controls')).opacity === '1'";
 
+/// The options sheet is closed, or open.
+const OPTIONS_CLOSED: &str = "document.querySelector('.options').hidden";
+const OPTIONS_OPEN: &str = "!document.querySelector('.options').hidden";
+
+/// What in `arguments[0]` (a selector) leaves the window, or sticks out of
+/// a row too narrow for what it holds, by name.
+const CUT_OFF: &str = "(root => { \
+    const name = e => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') \
+      + [...e.classList].map(c => '.' + c).join(''); \
+    const out = [root, ...root.querySelectorAll('*')].filter(e => { \
+      const r = e.getBoundingClientRect(); \
+      return r.width > 0 && (r.left < 0 || r.right > innerWidth) }); \
+    const tight = [...root.querySelectorAll('.play-row, .status-row, .welcome-cards')] \
+      .flatMap(row => { \
+        const r = row.getBoundingClientRect(); \
+        return [...row.querySelectorAll('*')].filter(e => { \
+          const c = e.getBoundingClientRect(); \
+          return c.width > 0 && (c.left < r.left - 0.5 || c.right > r.right + 0.5) }) }); \
+    return [...out, ...tight].map(name) })(document.querySelector(arguments[0]))";
+
 #[tokio::test]
 #[ignore]
 async fn plays_sentences_in_firefox() -> E2eResult {
@@ -259,12 +279,7 @@ async fn plays_sentences_in_firefox() -> E2eResult {
     // language there shows its translation where there is one.
     press(&client, "\u{E004}").await?; // Tab: furigana back
     click(&client, "#optionsButton").await?;
-    wait_for(
-        &client,
-        "the options",
-        "!document.querySelector('.sheet:not(.welcome)').hidden",
-    )
-    .await?;
+    wait_for(&client, "the options", OPTIONS_OPEN).await?;
     screenshot(&client, &out, "options").await?;
     js(
         &client,
@@ -273,12 +288,7 @@ async fn plays_sentences_in_firefox() -> E2eResult {
     )
     .await?;
     press(&client, "\u{E00C}").await?; // Escape
-    wait_for(
-        &client,
-        "the options to close",
-        "document.querySelector('.sheet:not(.welcome)').hidden",
-    )
-    .await?;
+    wait_for(&client, "the options to close", OPTIONS_CLOSED).await?;
     // The sentence stays: without German it shows the English translation,
     // tagged so, and without either none. Skipping on comes to a German
     // one (a third of those with a recording).
@@ -468,31 +478,17 @@ const LAYOUT: &str =
 async fn fits_a_tablet() -> E2eResult {
     let out = out_dir("smoke")?;
     let (client, _driver, port) = launch(ENGLISH).await?;
-    // What leaves the window, or a row too narrow for what it holds.
-    let cut_off = "(() => { \
-        const name = e => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') \
-          + [...e.classList].map(c => '.' + c).join(''); \
-        const out = [...document.querySelectorAll('main, main *')].filter(e => { \
-          const r = e.getBoundingClientRect(); \
-          return r.width > 0 && (r.left < 0 || r.right > innerWidth) }); \
-        const tight = [...document.querySelectorAll('.play-row, .status-row, .welcome-cards')] \
-          .flatMap(row => { \
-            const r = row.getBoundingClientRect(); \
-            return [...row.querySelectorAll('*')].filter(e => { \
-              const c = e.getBoundingClientRect(); \
-              return c.width > 0 && (c.left < r.left - 0.5 || c.right > r.right + 0.5) }) }); \
-        return [...out, ...tight].map(name) })()";
     for (width, height, name) in [(600, 960, "tablet-600"), (768, 1024, "tablet-768")] {
         resize(&client, width, height).await?;
         visit(&client, port).await?;
         let keyboard = js_bool_with(&client, LAYOUT, &[json!("main")]).await?;
         assert!(keyboard, "{name}: not the keyboard layout");
         screenshot(&client, &out, &format!("{name}-welcome")).await?;
-        let cut = js(&client, cut_off).await?;
+        let cut = js_with(&client, CUT_OFF, &[json!("main")]).await?;
         assert_eq!(cut, json!([]), "{name}: the choice cut off");
         reload_with(&client, json!({ "mode": "score" })).await?;
         screenshot(&client, &out, name).await?;
-        let cut = js(&client, cut_off).await?;
+        let cut = js_with(&client, CUT_OFF, &[json!("main")]).await?;
         assert_eq!(cut, json!([]), "{name}: the game cut off");
         js(&client, "(localStorage.clear(), true)").await?;
     }
@@ -574,6 +570,15 @@ async fn plays_on_a_phone() -> E2eResult {
     let done = "document.querySelector('.phone-bar .ready') !== null";
     assert!(js_bool(&client, done).await?, "the starter not completed");
     screenshot(&client, &out, "phone-done").await?;
+
+    // The options open from the bar, within the phone, and close again.
+    click(&client, "#optionsButton").await?;
+    wait_for(&client, "the options", OPTIONS_OPEN).await?;
+    let cut = js_with(&client, CUT_OFF, &[json!(".options")]).await?;
+    assert_eq!(cut, json!([]), "the options cut off");
+    screenshot(&client, &out, "phone-options").await?;
+    click(&client, ".options .sheet-head .button").await?;
+    wait_for(&client, "the options to close", OPTIONS_CLOSED).await?;
     assert_eq!(js(&client, "blocked").await?, json!([]), "CSP violations");
     close(client).await
 }

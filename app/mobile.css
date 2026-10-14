@@ -2,8 +2,9 @@
    (`style.css`) that desktops and tablets play. The page mounts one or the
    other; the colours, fonts and the manuscript squares are `style.css`'s.
 
-   From the top: retry and skip, the lens (the sentence as one column that
-   slides up past the square to type), the translation, the flick pad.
+   From the top: the options, retry and skip, the lens (the sentence as
+   one column that slides up past the square to type), the translation,
+   the flick pad.
    Only the column and the square to type move. */
 
 .phone {
@@ -27,9 +28,12 @@ body.loading .phone {
 
 .phone-bar {
   display: flex;
-  justify-content: flex-end;
   align-items: center;
   gap: 10px;
+}
+/* The options at the start, retry and skip at the end. */
+.phone-bar > :first-child {
+  margin-inline-end: auto;
 }
 
 /* THE LENS: the column slides so the square to type stays on the lens
@@ -151,15 +155,12 @@ body:not(.translation) .phone-translation {
   font-weight: bold;
 }
 
-/* SHEETS (the first run's choice) cover the phone, their cards stacked;
-   no keys to press. */
+/* SHEETS (the first run's choice, the options) cover the phone. */
 
 .phone .sheet {
   padding: 24px 20px;
 }
-.phone .welcome-cards {
-  grid-template-columns: 1fr;
-}
-.phone .welcome-card .key {
+/* No keys to press on a phone. */
+.phone .key {
   display: none;
 }

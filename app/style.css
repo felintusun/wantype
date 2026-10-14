@@ -679,7 +679,8 @@ body.step-back:not(.pointer) {
 }
 .sheet-columns {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* As many columns as fit: three on a desktop, one on a phone. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 32px;
   color: var(--text);
 }
@@ -869,7 +870,7 @@ body.step-back:not(.pointer) {
 }
 .welcome-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 24px;
 }
 .welcome-card {

@@ -14,7 +14,7 @@ use wasm_bindgen::JsCast;
 
 use crate::genko;
 use crate::js::Reported;
-use crate::{App, Shown, Welcome};
+use crate::{App, Options, OptionsButton, Shown, Welcome};
 
 /// Phones get this layout: a screen narrower than a portrait tablet, or a
 /// touch screen lower than one (a phone turned sideways).
@@ -80,6 +80,7 @@ pub fn Phone(
     view! {
         <div class="phone">
             <div class="phone-bar">
+                <OptionsButton app />
                 <button type="button" class="button" on:click=move |_| app.dispatch(Event::Restart)>
                     <span lang="ja">"やり直す"</span>
                 </button>
@@ -108,6 +109,7 @@ pub fn Phone(
             <div class="pad" lang="ja" role="group" aria-label="Flick keyboard">
                 {PAD.map(|pad| view! { <PadKey pad hint on_flick /> }).collect_view()}
             </div>
+            <Options app />
             <Welcome app />
         </div>
     }

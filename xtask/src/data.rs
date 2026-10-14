@@ -293,6 +293,11 @@ fn parse_id<Id>(field: &str, id: fn(u32) -> Id) -> Result<Id, RowError> {
     })
 }
 
+/// A Tatoeba sentence id field ([`parse_id`]).
+fn sentence_id(field: &str) -> Result<SentenceId, RowError> {
+    parse_id(field, SentenceId)
+}
+
 /// What the exports say about the Japanese sentences.
 #[derive(Debug, Default)]
 struct Exports {
@@ -322,9 +327,7 @@ impl Exports {
             let [id, _lang, text, ..] = f else {
                 return Err(RowError::Short(f.len()));
             };
-            exports
-                .texts
-                .insert(parse_id(id, SentenceId)?, text.to_string());
+            exports.texts.insert(sentence_id(id)?, text.to_string());
             Ok(())
         })?;
         let transcriptions = "jpn/jpn_transcriptions.tsv.bz2";
@@ -335,7 +338,7 @@ impl Exports {
             // "A transcription without a username has not been marked as
             // reviewed" (tatoeba.org/en/downloads).
             if !(user.is_empty() || *user == "\\N") {
-                let id = parse_id(id, SentenceId)?;
+                let id = sentence_id(id)?;
                 exports.transcriptions.insert(id, transcription.to_string());
             }
             Ok(())
@@ -351,7 +354,7 @@ impl Exports {
                     id: parse_id(audio, AudioId)?,
                     author: author.to_string(),
                 };
-                exports.audio.insert(parse_id(id, SentenceId)?, audio);
+                exports.audio.insert(sentence_id(id)?, audio);
                 Ok(())
             },
         )?;
@@ -435,12 +438,9 @@ fn translations(
             let [jpn, other, ..] = f else {
                 return Err(RowError::Short(f.len()));
             };
-            let jpn = parse_id(jpn, SentenceId)?;
+            let jpn = sentence_id(jpn)?;
             if wanted.contains(&jpn) {
-                links
-                    .entry(parse_id(other, SentenceId)?)
-                    .or_default()
-                    .push(jpn);
+                links.entry(sentence_id(other)?).or_default().push(jpn);
             }
             Ok(())
         },
@@ -452,7 +452,7 @@ fn translations(
             let [id, _lang, text, ..] = f else {
                 return Err(RowError::Short(f.len()));
             };
-            for &jpn in links.get(&parse_id(id, SentenceId)?).into_iter().flatten() {
+            for &jpn in links.get(&sentence_id(id)?).into_iter().flatten() {
                 found.push((jpn, text.to_string()));
             }
             Ok(())

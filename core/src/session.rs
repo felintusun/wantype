@@ -256,8 +256,7 @@ impl Settings {
     }
 
     /// The helpers shown, with one setting changed if `change` says so. The
-    /// key hint only shows with furigana (it would give the reading away),
-    /// the translation with a language.
+    /// key hint only shows with furigana (it would give the reading away).
     pub fn shown(&self, change: Option<(Helper, bool)>) -> Helpers {
         let on = |h| match change {
             Some((changed, on)) if changed == h => on,
@@ -433,13 +432,14 @@ impl Session {
             }),
             Event::LanguagesLoaded { available, browser } => {
                 let first_run = std::mem::take(&mut self.first_run);
-                let language = &self.settings.language;
                 let change = match browser {
                     Some(browser) if first_run && available.contains(&browser) => Some(browser),
-                    _ if !available.contains(language) => Some(Lang::english()),
+                    _ if !available.contains(&self.settings.language) => {
+                        Some(Settings::default().language)
+                    }
                     _ => None,
                 };
-                if let Some(language) = change.filter(|l| l != language) {
+                if let Some(language) = change {
                     self.change_settings(|s| s.language = language);
                 }
             }
@@ -1063,9 +1063,9 @@ mod tests {
     fn choosing_a_language_turns_translations_on() -> TestResult {
         let mut s = loaded("か", false)?;
         s.handle(Event::SetHelper(Helper::Translation, false), ms(0));
-        s.handle(Event::SetLanguage(lang("fra")), ms(0));
+        s.handle(Event::SetLanguage(Lang::new("fra")), ms(0));
         assert!(s.settings().translation_enabled);
-        assert_eq!(s.settings().language, lang("fra"));
+        assert_eq!(s.settings().language, Lang::new("fra"));
         // Unchanged settings are not announced.
         effects(&mut s);
         s.handle(Event::SetMincho(false), ms(0));
@@ -1080,7 +1080,7 @@ mod tests {
             "audio": false, "mincho": true, "unknownReadings": 1, "knownReadings": ["日|に"],
         });
         let s: Settings = serde_json::from_value(stored)?;
-        assert_eq!(s.language, lang("fra"));
+        assert_eq!(s.language, Lang::new("fra"));
         assert!(!s.translation_enabled && s.mincho);
         assert_eq!(s.unknown_readings, Some(1));
         assert!(s.known_readings.contains("日|に"));
@@ -1109,10 +1109,10 @@ mod tests {
         let sentence = Sentence::parse(None, "ねこ", translations, None)?;
         s.handle(Event::SentenceLoaded(sentence), ms(0));
         effects(&mut s);
-        s.handle(Event::SetLanguage(lang("deu")), ms(0));
+        s.handle(Event::SetLanguage(Lang::new("deu")), ms(0));
         assert_eq!(effects(&mut s), [Effect::SettingsChanged]);
         // No French: it stays, showing the English translation.
-        s.handle(Event::SetLanguage(lang("fra")), ms(0));
+        s.handle(Event::SetLanguage(Lang::new("fra")), ms(0));
         assert_eq!(effects(&mut s), [Effect::SettingsChanged]);
         Ok(())
     }
@@ -1120,11 +1120,11 @@ mod tests {
     #[test]
     fn an_unknown_language_falls_back() -> TestResult {
         let mut s = loaded("か", false)?;
-        s.handle(Event::SetLanguage(lang("xyz")), ms(0));
+        s.handle(Event::SetLanguage(Lang::new("xyz")), ms(0));
         s.handle(Event::SetHelper(Helper::Translation, false), ms(0));
         effects(&mut s);
         s.handle(loaded_languages(&["deu", "eng"], Some("deu")), ms(0));
-        assert_eq!(s.settings().language, lang("eng"));
+        assert_eq!(s.settings().language, Lang::english());
         // Only the language changes.
         assert!(!s.settings().translation_enabled);
         assert!(!effects(&mut s).is_empty());
@@ -1136,12 +1136,8 @@ mod tests {
         let Restored { settings, .. } = Settings::from_saved(r#"{ "language": "" }"#);
         let mut s = Session::new(settings);
         s.handle(loaded_languages(&["deu", "eng"], None), ms(0));
-        assert_eq!(s.settings().language, lang("eng"));
+        assert_eq!(s.settings().language, Lang::english());
         Ok(())
-    }
-
-    fn lang(code: &str) -> Lang {
-        Lang::new(code)
     }
 
     fn loaded_languages(available: &[&str], browser: Option<&str>) -> Event {
@@ -1156,15 +1152,15 @@ mod tests {
         let mut s = Session::first_run();
         // Not one the data lacks.
         s.handle(loaded_languages(&["eng"], Some("deu")), ms(0));
-        assert_eq!(s.settings().language, lang("eng"));
+        assert_eq!(s.settings().language, Lang::english());
         let mut s = Session::first_run();
         s.handle(loaded_languages(&["deu", "eng"], Some("deu")), ms(0));
-        assert_eq!(s.settings().language, lang("deu"));
+        assert_eq!(s.settings().language, Lang::new("deu"));
         // Only once: a later list keeps the player's choice. (Saved
         // settings never take it: see `an_unknown_language_falls_back`.)
-        s.handle(Event::SetLanguage(lang("fra")), ms(0));
+        s.handle(Event::SetLanguage(Lang::new("fra")), ms(0));
         s.handle(loaded_languages(&["deu", "eng", "fra"], Some("deu")), ms(0));
-        assert_eq!(s.settings().language, lang("fra"));
+        assert_eq!(s.settings().language, Lang::new("fra"));
     }
 
     #[test]
@@ -1176,7 +1172,7 @@ mod tests {
             settings: s,
             problems,
         } = Settings::from_saved(&saved.to_string());
-        assert_eq!(s.language, lang("deu"));
+        assert_eq!(s.language, Lang::new("deu"));
         assert_eq!(*s.known_readings, ["日|に".to_string()].into());
         // The malformed ones take their defaults, and are named.
         assert!(s.furigana && !s.audio);
