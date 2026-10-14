@@ -3,7 +3,7 @@
 //! `geemu` for ゲーム, `nee` for ねぇ). The key still counts as a miss, so the
 //! IME habit is what the player learns; the frontend explains the spelling.
 
-use crate::rules::{is_small, steps, Mode};
+use crate::rules::{Mode, is_small, steps};
 
 /// Which spelling rule the key missed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,10 +1,13 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["core", "app", "xtask", "e2e"]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+# The Rust CI builds with (pages.yml): `cargo update` picks only crates
+# it can build.
+rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/felintusun/wantype"
 

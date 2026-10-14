@@ -16,7 +16,7 @@ use crate::flick::{Composer, Gesture};
 use crate::ladder::{self, Helper, Helpers, Ladder, Mode, Numerals, Outcome, Recorded, Tier};
 use crate::lang::Lang;
 use crate::matcher::Matcher;
-use crate::sentence::{segments, Audio, Segment, Sentence};
+use crate::sentence::{Audio, Segment, Sentence, segments};
 use crate::slip::Slip;
 use crate::tatoeba::Filter;
 
@@ -503,10 +503,10 @@ impl Session {
         if let Some(helper) = self.fade_pending.take() {
             self.change_settings(|s| s.set_helper(helper, false));
         }
-        if self.settings.audio {
-            if let Some(audio) = &sentence.audio {
-                self.effects.push_back(Effect::PlayAudio(audio.clone()));
-            }
+        if self.settings.audio
+            && let Some(audio) = &sentence.audio
+        {
+            self.effects.push_back(Effect::PlayAudio(audio.clone()));
         }
         self.outcome = None;
         self.round = Some(Round::new(sentence, self.helpers()));

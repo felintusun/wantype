@@ -8,7 +8,7 @@
 //! (a small NFA over the rule table) and only rejects a key that fits none.
 
 use crate::chars::fold;
-use crate::rules::{steps, Mode};
+use crate::rules::{Mode, steps};
 use crate::slip::{self, Slip};
 
 /// One way the input typed so far can continue: typing the kana at `pos`

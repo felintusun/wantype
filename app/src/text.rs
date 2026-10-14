@@ -2,7 +2,7 @@
 //! per the options) numbers are written in positional kanji digits, as
 //! vertical typesetting does: 1240 → 一二四〇.
 
-use wantype_core::ladder::{kanji_digits, Ladder, PIPS};
+use wantype_core::ladder::{Ladder, PIPS, kanji_digits};
 use wantype_core::{Helper, Numerals, Tier};
 
 /// A helper's English and Japanese label.

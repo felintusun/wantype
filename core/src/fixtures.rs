@@ -28,8 +28,7 @@ const FIXTURES: &[Fixture] = &[
     STARTER,
     Fixture {
         id: Some(SentenceId(78642)),
-        transcription:
-            "[来週|らい|しゅう]の[日曜日|にち|よう|び]に[遊|あそ]びに[来|き]てください。",
+        transcription: "[来週|らい|しゅう]の[日曜日|にち|よう|び]に[遊|あそ]びに[来|き]てください。",
         english: "Come and see me on Sunday next week.",
         audio: Some((AudioId(12200), "huizi99")),
     },

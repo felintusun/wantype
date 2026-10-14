@@ -11,7 +11,7 @@ use base64::Engine;
 use sha2::{Digest, Sha256};
 use wantype_core::AudioId;
 
-use crate::{at, IoError};
+use crate::{IoError, at};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

@@ -27,11 +27,11 @@ use wantype_core::tatoeba::{self, Language};
 // Renamed: Leptos has its own `Effect`.
 use wantype_core::Effect as Fx;
 use wantype_core::{
-    fixtures, Event, Helper, Helpers, Key, Lang, Mode, Modifiers, Numerals, Outcome, Restored,
-    Segment, SentenceId, Session, Settings, Slip, SlipKind, Tier,
+    Event, Helper, Helpers, Key, Lang, Mode, Modifiers, Numerals, Outcome, Restored, Segment,
+    SentenceId, Session, Settings, Slip, SlipKind, Tier, fixtures,
 };
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_time::Instant;
 

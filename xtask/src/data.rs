@@ -18,12 +18,12 @@ use std::thread;
 
 use bzip2::read::MultiBzDecoder;
 use wantype_core::tatoeba::{
-    translated_languages, with_audio, DataFile, Index, Language, RawSentence, Readings, CHUNK_SIZE,
-    FORMAT,
+    CHUNK_SIZE, DataFile, FORMAT, Index, Language, RawSentence, Readings, translated_languages,
+    with_audio,
 };
 use wantype_core::{Audio, AudioId, Lang, Matcher, Sentence, SentenceId};
 
-use crate::{at, root, IoError};
+use crate::{IoError, at, root};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -105,14 +105,12 @@ fn out_dir() -> PathBuf {
 
 pub fn data(update: bool) -> Result {
     let out = out_dir();
-    if !update {
-        if let Some(index) = current(&out)? {
-            println!(
-                "sentence data is up to date ({} sentences, exported {}; --update checks for newer)",
-                index.sentences, index.exported
-            );
-            return Ok(());
-        }
+    if !update && let Some(index) = current(&out)? {
+        println!(
+            "sentence data is up to date ({} sentences, exported {}; --update checks for newer)",
+            index.sentences, index.exported
+        );
+        return Ok(());
     }
     let downloads = Downloads::new(update);
     let exports = Exports::download(&downloads)?;
@@ -186,10 +184,10 @@ impl Downloads {
         }
         let url = format!("{EXPORTS}/{path}");
         let mut request = self.agent.get(&url);
-        if file.exists() {
-            if let Some(since) = read_if_exists(&stamp)? {
-                request = request.header("If-Modified-Since", since.trim());
-            }
+        if file.exists()
+            && let Some(since) = read_if_exists(&stamp)?
+        {
+            request = request.header("If-Modified-Since", since.trim());
         }
         let mut response = request.call().map_err(|source| Error::Http {
             url: url.clone(),

@@ -12,7 +12,7 @@
 mod common;
 
 use common::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// `<main>` as markup, with what lives in properties and animations
 /// written into attributes, and the body's classes.

@@ -11,9 +11,9 @@ use std::path::PathBuf;
 use unicode_normalization::UnicodeNormalization;
 use wantype_core::flick::{self, FlickError};
 use wantype_core::tatoeba::{
-    locate, translated_languages, with_audio, DataFile, Index, RawSentence, Readings,
+    DataFile, Index, RawSentence, Readings, locate, translated_languages, with_audio,
 };
-use wantype_core::{fold, Lang, Matcher, ParseError, RomajiError, SentenceId};
+use wantype_core::{Lang, Matcher, ParseError, RomajiError, SentenceId, fold};
 
 #[derive(Debug, thiserror::Error)]
 enum DataError {

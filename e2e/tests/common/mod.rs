@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use fantoccini::actions::{InputSource, PointerAction, TouchActions, MOUSE_BUTTON_LEFT};
+use fantoccini::actions::{InputSource, MOUSE_BUTTON_LEFT, PointerAction, TouchActions};
 use fantoccini::error::{CmdError, NewSessionError};
 use fantoccini::{Client, ClientBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
-use serde_json::json;
+use serde_json::{Map, Value, json};
 
 pub fn workspace() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
@@ -104,7 +104,7 @@ pub enum E2eError {
     #[error("{expression}: {value} is not a {kind}")]
     Type {
         expression: String,
-        value: serde_json::Value,
+        value: Value,
         kind: &'static str,
     },
     #[error("timed out waiting for {0}")]
@@ -173,7 +173,7 @@ impl Drop for Driver {
 /// A headless Firefox through geckodriver on `port`, preferring
 /// `languages` (`intl.accept_languages`, as in `de-AT, en`).
 pub async fn connect(port: u16, languages: &str) -> E2eResult<Client> {
-    let mut capabilities = serde_json::Map::new();
+    let mut capabilities = Map::new();
     // Loads finish at DOMContentLoaded: the test waits for the app itself,
     // and the full load event waits for recordings from tatoeba.org.
     capabilities.insert("pageLoadStrategy".into(), json!("eager"));
@@ -200,17 +200,13 @@ pub async fn connect(port: u16, languages: &str) -> E2eResult<Client> {
     }
 }
 
-pub async fn js(client: &Client, expression: &str) -> E2eResult<serde_json::Value> {
+pub async fn js(client: &Client, expression: &str) -> E2eResult<Value> {
     js_with(client, expression, &[]).await
 }
 
 /// `expression`'s value, `args` given to it as `arguments[0]`,
 /// `arguments[1]`…: values travel as JSON, never spliced into the script.
-pub async fn js_with(
-    client: &Client,
-    expression: &str,
-    args: &[serde_json::Value],
-) -> E2eResult<serde_json::Value> {
+pub async fn js_with(client: &Client, expression: &str, args: &[Value]) -> E2eResult<Value> {
     client
         .execute(&format!("return {expression}"), args.to_vec())
         .await
@@ -219,7 +215,7 @@ pub async fn js_with(
 
 pub async fn js_str(client: &Client, expression: &str) -> E2eResult<String> {
     match js(client, expression).await? {
-        serde_json::Value::String(text) => Ok(text),
+        Value::String(text) => Ok(text),
         value => Err(E2eError::Type {
             expression: expression.into(),
             value,
@@ -233,13 +229,9 @@ pub async fn js_bool(client: &Client, expression: &str) -> E2eResult<bool> {
 }
 
 /// [`js_bool`] of `expression`, given `args` ([`js_with`]).
-pub async fn js_bool_with(
-    client: &Client,
-    expression: &str,
-    args: &[serde_json::Value],
-) -> E2eResult<bool> {
+pub async fn js_bool_with(client: &Client, expression: &str, args: &[Value]) -> E2eResult<bool> {
     match js_with(client, expression, args).await? {
-        serde_json::Value::Bool(value) => Ok(value),
+        Value::Bool(value) => Ok(value),
         value => Err(E2eError::Type {
             expression: expression.into(),
             value,
@@ -260,9 +252,9 @@ pub async fn press(client: &Client, keys: &str) -> E2eResult {
 /// The next key to type, shown as the hint or not; `""` once completed.
 const NEXT_KEY: &str = "document.getElementById('sentenceContainer').dataset.next";
 /// [`NEXT_KEY`], or `null` once the square to type holds `arguments[0]`.
-const NEXT_KEY_TO: &str =
-    "document.querySelector('.genko-square.active')?.firstChild?.nodeValue === arguments[0] \
-     ? null : document.getElementById('sentenceContainer').dataset.next";
+const NEXT_KEY_TO: &str = "\
+    document.querySelector('.genko-square.active')?.firstChild?.nodeValue === arguments[0] \
+    ? null : document.getElementById('sentenceContainer').dataset.next";
 
 /// The next key to type, shown as the hint or not.
 pub async fn next_key(client: &Client) -> E2eResult<String> {
@@ -271,11 +263,11 @@ pub async fn next_key(client: &Client) -> E2eResult<String> {
 
 /// Type the keys `step` (a script, given `args`) gives, one script per key,
 /// until it gives `null`: whether it did before the sentence ended.
-async fn type_until(client: &Client, step: &str, args: &[serde_json::Value]) -> E2eResult<bool> {
+async fn type_until(client: &Client, step: &str, args: &[Value]) -> E2eResult<bool> {
     for _ in 0..500 {
         match js_with(client, step, args).await? {
-            serde_json::Value::Null => return Ok(true),
-            serde_json::Value::String(key) if !key.is_empty() => press(client, &key).await?,
+            Value::Null => return Ok(true),
+            Value::String(key) if !key.is_empty() => press(client, &key).await?,
             _ => return Ok(false),
         }
     }
@@ -329,7 +321,7 @@ pub async fn wait_for_with(
     client: &Client,
     what: &str,
     expression: &str,
-    args: &[serde_json::Value],
+    args: &[Value],
 ) -> E2eResult {
     for _ in 0..100 {
         if js_with(client, expression, args).await? == json!(true) {
@@ -342,7 +334,7 @@ pub async fn wait_for_with(
 
 /// Replace the saved settings and reload, as a returning player would
 /// come back.
-pub async fn reload_with(client: &Client, settings: serde_json::Value) -> E2eResult {
+pub async fn reload_with(client: &Client, settings: Value) -> E2eResult {
     js_with(
         client,
         "(localStorage.setItem(arguments[0], arguments[1]), true)",

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use resvg::{tiny_skia, usvg};
 
-use crate::{at, root, IoError};
+use crate::{IoError, at, root};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

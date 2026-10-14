@@ -322,7 +322,7 @@ pub fn view(
 mod tests {
     use std::collections::BTreeMap;
 
-    use wantype_core::{segments, ParseError, Sentence};
+    use wantype_core::{ParseError, Sentence, segments};
 
     use super::*;
 

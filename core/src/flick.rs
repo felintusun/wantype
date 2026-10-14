@@ -73,11 +73,7 @@ impl Flick {
         if dx.hypot(dy) < Flick::REACH {
             Flick::Tap
         } else if dx.abs() > dy.abs() {
-            if dx < 0.0 {
-                Flick::Left
-            } else {
-                Flick::Right
-            }
+            if dx < 0.0 { Flick::Left } else { Flick::Right }
         } else if dy < 0.0 {
             Flick::Up
         } else {

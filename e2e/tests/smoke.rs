@@ -11,7 +11,7 @@ mod common;
 
 use common::*;
 use fantoccini::{Client, Locator};
-use serde_json::json;
+use serde_json::{Value, json};
 
 /// Record Content-Security-Policy violations from here on.
 async fn watch_policy(client: &Client) -> E2eResult {
@@ -541,12 +541,11 @@ async fn plays_on_a_phone() -> E2eResult {
         (document.querySelector('.pad-key[data-hint]'))";
     let at = "getComputedStyle(document.querySelector('.lens')).getPropertyValue('--at')";
     let mut flicks = 0;
-    while let serde_json::Value::Array(hint) = js(&client, hinted).await? {
-        let [serde_json::Value::Number(key), serde_json::Value::String(way)] = hint.as_slice()
-        else {
+    while let Value::Array(hint) = js(&client, hinted).await? {
+        let [Value::Number(key), Value::String(way)] = hint.as_slice() else {
             return Err(E2eError::Type {
                 expression: hinted.into(),
-                value: serde_json::Value::Array(hint),
+                value: Value::Array(hint),
                 kind: "[key, flick]",
             });
         };

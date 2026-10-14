@@ -6,7 +6,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::lang::{Lang, ENGLISH};
+use crate::lang::{ENGLISH, Lang};
 
 /// Tatoeba's site, in English.
 const TATOEBA: &str = "https://tatoeba.org/en";

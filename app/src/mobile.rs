@@ -8,7 +8,7 @@
 
 use leptos::ev::PointerEvent;
 use leptos::prelude::*;
-use wantype_core::flick::{Flick, Gesture, Pad, FLICKS, PAD};
+use wantype_core::flick::{FLICKS, Flick, Gesture, PAD, Pad};
 use wantype_core::{Event, Session};
 use wasm_bindgen::JsCast;
 
@@ -298,10 +298,10 @@ fn PadKey(
                 toward.set(Some(Flick::Tap));
             }
             on:pointermove=move |e: PointerEvent| {
-                if let Some(flick) = motion(&e) {
-                    if toward.get_untracked() != Some(flick) {
-                        toward.set(Some(flick));
-                    }
+                if let Some(flick) = motion(&e)
+                    && toward.get_untracked() != Some(flick)
+                {
+                    toward.set(Some(flick));
                 }
             }
             on:pointerup=move |e: PointerEvent| {

@@ -33,11 +33,11 @@ pub use ladder::{Grade, Helper, Helpers, Ladder, Mode, Numerals, Outcome, Tier};
 pub use lang::Lang;
 pub use matcher::{Matcher, RomajiError};
 pub use sentence::{
-    segments, Audio, AudioId, ParseError, Part, Progress, Segment, Sentence, SentenceId, Target,
-    Translation,
+    Audio, AudioId, ParseError, Part, Progress, Segment, Sentence, SentenceId, Target, Translation,
+    segments,
 };
 pub use session::{
-    wpm, Effect, Event, Key, Modifiers, Restored, SavedError, Session, Settings, Stats,
+    Effect, Event, Key, Modifiers, Restored, SavedError, Session, Settings, Stats, wpm,
 };
 pub use slip::{Slip, SlipKind};
 

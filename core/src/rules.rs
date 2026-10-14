@@ -406,13 +406,13 @@ pub(crate) fn steps(rest: &[char], mode: Mode) -> Vec<Step> {
                 .iter()
                 .for_each(|keys| push(keys, Mode::Combined));
         }
-        if !context.is_some_and(|rule| rule.exclusive) {
-            if let Some(general) = rules.iter().find(|rule| rule.next.is_empty()) {
-                general
-                    .romaji
-                    .iter()
-                    .for_each(|keys| push(keys, Mode::Free));
-            }
+        if context.is_none_or(|rule| !rule.exclusive)
+            && let Some(general) = rules.iter().find(|rule| rule.next.is_empty())
+        {
+            general
+                .romaji
+                .iter()
+                .for_each(|keys| push(keys, Mode::Free));
         }
     }
     if let Some(keys) = kana_keys(c) {

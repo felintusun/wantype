@@ -1,6 +1,7 @@
 # Builds the site and publishes it on GitHub Pages (Settings → Pages →
 # Source: GitHub Actions). Monthly, it rebuilds with Tatoeba's newer exports.
-# Linted with zizmor (`just lint`); actions are pinned to commits.
+# Lints and audits the code too (`just lint`, which also checks this file
+# with zizmor, and `just audit`); actions are pinned to commits.
 name: Pages
 
 on:
@@ -54,6 +55,33 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: target/site
+
+  # Not needed by the deploy: a lint or a new advisory (the monthly run
+  # finds those too) is reported, the site still published.
+  lint:
+    name: Lint and audit
+    runs-on: ubuntu-latest
+    concurrency:
+      group: lint
+      cancel-in-progress: true
+    container:
+      image: rust:1.99.0-trixie@sha256:81015672d6939b0265f09adf96d5de125482bb1330106076956b0518e74edc90
+    permissions:
+      contents: read # check out the code
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The image has the minimal profile.
+      - run: rustup component add clippy rustfmt
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # The versions `just lint` and `just audit` install.
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: just@1.58.0,zizmor@1.30.1,cargo-audit@0.22.2,cargo-shear@1.14.0
+      - run: just lint
+      - run: just audit
 
   deploy:
     name: Deploy

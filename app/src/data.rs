@@ -10,7 +10,7 @@ use std::sync::Arc;
 use futures::lock::Mutex;
 use serde::de::DeserializeOwned;
 use wantype_core::tatoeba::{
-    candidates, locate, DataFile, Filter, Index, Indices, Language, Picker, RawSentence, Readings,
+    DataFile, Filter, Index, Indices, Language, Picker, RawSentence, Readings, candidates, locate,
 };
 use wantype_core::{ParseError, Sentence, SentenceId, Settings};
 use wasm_bindgen::JsCast;
