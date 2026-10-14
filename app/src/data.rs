@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use wantype_core::tatoeba::{
     candidates, locate, DataFile, Filter, Index, Indices, Language, Picker, RawSentence, Readings,
 };
-use wantype_core::{ParseError, Sentence, Settings};
+use wantype_core::{ParseError, Sentence, SentenceId, Settings};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
@@ -46,7 +46,7 @@ pub enum DataError {
     Missing { pick: u32, chunk: u32 },
     #[error("sentence {id}")]
     Sentence {
-        id: u32,
+        id: SentenceId,
         #[source]
         source: ParseError,
     },

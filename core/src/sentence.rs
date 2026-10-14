@@ -2,6 +2,54 @@
 //! carrying the kana the player types (shown as furigana).
 
 use std::collections::BTreeMap;
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+use crate::lang::{Lang, ENGLISH};
+
+/// Tatoeba's site, in English.
+const TATOEBA: &str = "https://tatoeba.org/en";
+
+/// A Tatoeba sentence id (a translation is a sentence too).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SentenceId(pub u32);
+
+impl SentenceId {
+    /// The sentence's page on Tatoeba.
+    pub fn url(self) -> String {
+        format!("{TATOEBA}/sentences/show/{self}")
+    }
+}
+
+/// A Tatoeba recording id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct AudioId(pub u32);
+
+impl AudioId {
+    /// The recording's sources, in the order upstream tries them.
+    /// (Upstream's second one, `api.tatoeba.org/unstable/audio/<id>/file`,
+    /// now answers 404; the stable API serves recordings at `v1/audios`.)
+    pub fn urls(self) -> [String; 2] {
+        [
+            format!("{TATOEBA}/audio/download/{self}"),
+            format!("https://api.tatoeba.org/v1/audios/{self}/file"),
+        ]
+    }
+}
+impl fmt::Display for SentenceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl fmt::Display for AudioId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// One displayed unit. Kana and punctuation are one char each with no
 /// transcription; a kanji part carries the kana typed for it.
@@ -22,31 +70,19 @@ impl Part {
 }
 
 /// A native-speaker recording on Tatoeba.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Audio {
-    pub id: String,
+    pub id: AudioId,
     pub author: String,
-}
-
-impl Audio {
-    /// Remote sources, in the order upstream tries them. (Upstream's second
-    /// one, `api.tatoeba.org/unstable/audio/<id>/file`, now answers 404; the
-    /// stable API serves recordings at `v1/audios`.)
-    pub fn urls(&self) -> [String; 2] {
-        [
-            format!("https://tatoeba.org/en/audio/download/{}", self.id),
-            format!("https://api.tatoeba.org/v1/audios/{}/file", self.id),
-        ]
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sentence {
     /// Tatoeba sentence id, if the sentence comes from Tatoeba.
-    pub id: Option<String>,
+    pub id: Option<SentenceId>,
     pub parts: Vec<Part>,
     /// Translations by Tatoeba language code (`eng`, `fra`, …).
-    pub translations: BTreeMap<String, String>,
+    pub translations: BTreeMap<Lang, String>,
     pub audio: Option<Audio>,
 }
 
@@ -59,9 +95,6 @@ pub enum ParseError {
     #[error("group at byte {at} has no kana")]
     MissingKana { at: usize },
 }
-
-/// The translation shown when there is none in the chosen language.
-pub const FALLBACK_LANGUAGE: &str = "eng";
 
 impl Sentence {
     /// Parse Tatoeba's transcription format, e.g. `[私|わたし]は[月給|げっ|きゅう]です。`.
@@ -127,13 +160,13 @@ impl Sentence {
     }
 
     pub fn parse(
-        id: Option<&str>,
+        id: Option<SentenceId>,
         transcription: &str,
-        translations: BTreeMap<String, String>,
+        translations: BTreeMap<Lang, String>,
         audio: Option<Audio>,
     ) -> Result<Self, ParseError> {
         Ok(Sentence {
-            id: id.map(str::to_string),
+            id,
             parts: Self::parse_parts(transcription)?,
             translations,
             audio,
@@ -162,15 +195,21 @@ impl Sentence {
         self.parts.iter().map(Part::kana).collect()
     }
 
-    /// The translation into `language`, or else into English: the language
-    /// it is in, and its text. Sentences are picked whatever the language,
-    /// and nearly all have an English one.
-    pub fn translation(&self, language: &str) -> Option<(&str, &str)> {
-        [language, FALLBACK_LANGUAGE]
+    /// The translation into `language`, or else into English. Sentences are
+    /// picked whatever the language, and nearly all have an English one.
+    pub fn translation(&self, language: &Lang) -> Option<Translation<'_>> {
+        [language.as_str(), ENGLISH]
             .into_iter()
             .find_map(|lang| self.translations.get_key_value(lang))
-            .map(|(lang, text)| (lang.as_str(), text.as_str()))
+            .map(|(lang, text)| Translation { lang, text })
     }
+}
+
+/// A sentence's translation: the language it is in, and its text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Translation<'a> {
+    pub lang: &'a Lang,
+    pub text: &'a str,
 }
 
 fn plain_part(c: char) -> Part {
@@ -325,11 +364,13 @@ mod tests {
     #[test]
     fn translations_fall_back_to_english() -> TestResult {
         let translations = [("deu", "Katze"), ("eng", "Cat")]
-            .map(|(lang, text)| (lang.to_string(), text.to_string()));
+            .map(|(lang, text)| (Lang::new(lang), text.to_string()));
         let sentence = Sentence::parse(None, "ねこ", translations.into(), None)?;
-        assert_eq!(sentence.translation("deu"), Some(("deu", "Katze")));
-        assert_eq!(sentence.translation("fra"), Some(("eng", "Cat")));
-        assert_eq!(parse("ねこ")?.translation("fra"), None);
+        let [deu, eng, fra] = ["deu", "eng", "fra"].map(Lang::new);
+        let translation = |lang, text| Some(Translation { lang, text });
+        assert_eq!(sentence.translation(&deu), translation(&deu, "Katze"));
+        assert_eq!(sentence.translation(&fra), translation(&eng, "Cat"));
+        assert_eq!(parse("ねこ")?.translation(&fra), None);
         Ok(())
     }
 

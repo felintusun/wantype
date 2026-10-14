@@ -27,8 +27,8 @@ use wantype_core::tatoeba::{self, Language};
 // Renamed: Leptos has its own `Effect`.
 use wantype_core::Effect as Fx;
 use wantype_core::{
-    fixtures, Event, Helper, Helpers, Key, Mode, Modifiers, Numerals, Outcome, Restored, Segment,
-    Session, Settings, Slip, SlipKind, Tier,
+    fixtures, Event, Helper, Helpers, Key, Lang, Mode, Modifiers, Numerals, Outcome, Restored,
+    Segment, SentenceId, Session, Settings, Slip, SlipKind, Tier,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -128,7 +128,8 @@ fn is_ime_key(key: &str, composing: bool, key_code: u32) -> bool {
 /// HTML `lang` for a Tatoeba language code (ISO 639-3), canonicalized by
 /// the browser's CLDR data: `eng` → `en`, `cmn` → `zh`, `lvs` → `lv`; codes
 /// without a shorter form (`yue`, `jbo`) stay as they are.
-fn html_lang(code: &str) -> String {
+fn html_lang(lang: &Lang) -> String {
+    let code = lang.as_str();
     // `getCanonicalLocales` throws on malformed tags; Tatoeba codes are plain
     // 2–3 letter language subtags.
     let simple = (2..=3).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_lowercase());
@@ -309,9 +310,17 @@ struct Shown {
     settings: Memo<Settings>,
     helpers: Memo<Helpers>,
     completed: Memo<bool>,
-    /// The translation shown, in the chosen language or else in English,
-    /// with its HTML `lang`; `None` without a language or a translation.
-    translation: Memo<Option<(String, String)>>,
+    /// The translation shown, in the chosen language or else in English;
+    /// `None` without a translation in either.
+    translation: Memo<Option<ShownTranslation>>,
+}
+
+/// A translation as the page shows it.
+#[derive(Clone, PartialEq)]
+struct ShownTranslation {
+    /// Its language as an HTML `lang` ([`html_lang`]).
+    lang: String,
+    text: String,
 }
 
 impl Shown {
@@ -321,12 +330,12 @@ impl Shown {
         let language = Memo::new(move |_| settings.with(|s| s.language.clone()));
         let translation = Memo::new(move |_| {
             let language = language.read();
-            if language.is_empty() {
-                return None;
-            }
             sentence.with(|s| {
-                let (lang, text) = s.as_ref()?.translation(&language)?;
-                Some((html_lang(lang), text.to_string()))
+                let translation = s.as_ref()?.translation(&language)?;
+                Some(ShownTranslation {
+                    lang: html_lang(translation.lang),
+                    text: translation.text.to_string(),
+                })
             })
         });
         Shown {
@@ -343,7 +352,7 @@ impl Shown {
     fn translation_text(self) -> impl Fn() -> Option<String> + Copy {
         move || {
             self.translation
-                .with(|t| t.as_ref().map(|(_, text)| text.clone()))
+                .with(|t| t.as_ref().map(|t| t.text.clone()))
         }
     }
 
@@ -351,7 +360,7 @@ impl Shown {
     fn translation_lang(self) -> impl Fn() -> Option<String> + Copy {
         move || {
             self.translation
-                .with(|t| t.as_ref().map(|(lang, _)| lang.clone()))
+                .with(|t| t.as_ref().map(|t| t.lang.clone()))
         }
     }
 }
@@ -414,7 +423,7 @@ impl App {
                     app.dispatch(Event::LanguagesLoaded {
                         available: list.iter().map(|l| l.lang.clone()).collect(),
                         browser: tatoeba::browser_language(&browser_languages(), &list, html_lang)
-                            .map(String::from),
+                            .cloned(),
                     });
                     app.languages.set(Ok(list));
                 }
@@ -454,7 +463,7 @@ impl App {
         if self.loaded.read_value().as_ref() != Some(&audio) {
             el.replace_children_with_node_0();
             let document = document();
-            for url in audio.urls() {
+            for url in audio.id.urls() {
                 let source = document.create_element("source").map_err(JsFailure::from)?;
                 source.set_attribute("src", &url).map_err(JsFailure::from)?;
                 el.append_child(&source).map_err(JsFailure::from)?;
@@ -863,7 +872,7 @@ fn Game(
     let next_key = move || session.with(|s| s.hint().map(String::from).unwrap_or_default());
     let translation = app.view.translation_text();
     let translation_lang = app.view.translation_lang();
-    let tatoeba_id = move || sentence.with(|s| s.as_ref().and_then(|s| s.id.clone()));
+    let tatoeba_id = move || sentence.with(|s| s.as_ref().and_then(|s| s.id));
     let refs = app.refs;
 
     let stats_text = move || {
@@ -1266,7 +1275,7 @@ fn Options(
     scoring: Memo<bool>,
     numbers: Memo<Numbers>,
     languages: RwSignal<Result<Vec<Language>, Arc<data::DataError>>>,
-    tatoeba_id: Signal<Option<String>>,
+    tatoeba_id: Signal<Option<SentenceId>>,
 ) -> impl IntoView {
     let session = app.session;
     let zen = move || settings.with(|s| s.mode == Some(Mode::Zen));
@@ -1418,15 +1427,14 @@ fn Options(
                             id="languageSelect"
                             prop:value=move || {
                                 languages.track();
-                                settings.with(|s| s.language.clone())
+                                settings.with(|s| s.language.to_string())
                             }
-                            on:change=move |e| app.dispatch(Event::SetLanguage(event_target_value(&e)))
+                            on:change=move |e| app.dispatch(Event::SetLanguage(Lang::new(event_target_value(&e))))
                         >
-                            <option value="">"None"</option>
                             <For
                                 each=move || languages.get().into_iter().flatten()
                                 key=|l| l.lang.clone()
-                                children=|l| view! { <option value=l.lang.clone()>{l.name.clone()}</option> }
+                                children=|l| view! { <option value=l.lang.to_string()>{l.name.clone()}</option> }
                             />
                         </select>
                     </label>
@@ -1470,7 +1478,7 @@ fn Options(
                     id="sentenceOriginLink"
                     class="button"
                     target="_blank"
-                    href=move || tatoeba_id.get().map(|id| format!("https://tatoeba.org/en/sentences/show/{id}"))
+                    href=move || tatoeba_id.get().map(SentenceId::url)
                 >
                     <span>"この文を" <span class="bold">"Tatoeba"</span> "で見る"</span>
                 </a>

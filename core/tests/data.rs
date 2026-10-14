@@ -13,7 +13,7 @@ use wantype_core::flick::{self, FlickError};
 use wantype_core::tatoeba::{
     locate, translated_languages, with_audio, DataFile, Index, RawSentence, Readings,
 };
-use wantype_core::{fold, Matcher, ParseError, RomajiError};
+use wantype_core::{fold, Lang, Matcher, ParseError, RomajiError, SentenceId};
 
 #[derive(Debug, thiserror::Error)]
 enum DataError {
@@ -31,19 +31,19 @@ enum DataError {
     },
     #[error("sentence {id}")]
     Parse {
-        id: u32,
+        id: SentenceId,
         #[source]
         source: ParseError,
     },
     #[error("sentence {id} cannot be typed")]
     Untypeable {
-        id: u32,
+        id: SentenceId,
         #[source]
         source: RomajiError,
     },
     #[error("sentence {id} cannot be flicked")]
     Unflickable {
-        id: u32,
+        id: SentenceId,
         #[source]
         source: FlickError,
     },
@@ -142,7 +142,7 @@ fn the_data_is_consistent_and_every_sentence_typeable() -> Result<(), DataError>
     assert_eq!(sentences.len(), index.sentences as usize, "sentences");
 
     assert_eq!(with_audio(&sentences), index.audio, "sentences with audio");
-    let languages: BTreeSet<&str> = index.languages.iter().map(|l| l.lang.as_str()).collect();
+    let languages: BTreeSet<&Lang> = index.languages.iter().map(|l| &l.lang).collect();
     assert_eq!(languages, translated_languages(&sentences), "languages");
     Ok(())
 }

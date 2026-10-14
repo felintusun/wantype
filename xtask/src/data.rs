@@ -18,10 +18,10 @@ use std::thread;
 
 use bzip2::read::MultiBzDecoder;
 use wantype_core::tatoeba::{
-    translated_languages, with_audio, DataFile, Index, Language, RawAudio, RawSentence, Readings,
-    CHUNK_SIZE, FORMAT,
+    translated_languages, with_audio, DataFile, Index, Language, RawSentence, Readings, CHUNK_SIZE,
+    FORMAT,
 };
-use wantype_core::{Matcher, Sentence};
+use wantype_core::{Audio, AudioId, Lang, Matcher, Sentence, SentenceId};
 
 use crate::{at, root, IoError};
 
@@ -285,9 +285,9 @@ impl<R: Read> Read for Capped<R> {
     }
 }
 
-/// A Tatoeba id field.
-fn parse_id(field: &str) -> Result<u32, RowError> {
-    field.parse().map_err(|source| RowError::Id {
+/// A Tatoeba id field: a sentence's or a recording's.
+fn parse_id<Id>(field: &str, id: fn(u32) -> Id) -> Result<Id, RowError> {
+    field.parse().map(id).map_err(|source| RowError::Id {
         field: field.into(),
         source,
     })
@@ -297,21 +297,21 @@ fn parse_id(field: &str) -> Result<u32, RowError> {
 #[derive(Debug, Default)]
 struct Exports {
     /// Tatoeba id → text.
-    texts: HashMap<u32, String>,
+    texts: HashMap<SentenceId, String>,
     /// Tatoeba id → reviewed furigana transcription.
-    transcriptions: HashMap<u32, String>,
-    audio: HashMap<u32, RawAudio>,
+    transcriptions: HashMap<SentenceId, String>,
+    audio: HashMap<SentenceId, Audio>,
     /// Tatoeba id → language → translation.
-    translations: HashMap<u32, BTreeMap<String, String>>,
+    translations: HashMap<SentenceId, BTreeMap<Lang, String>>,
     /// Translation languages offered: code → English name.
-    names: BTreeMap<String, String>,
+    names: BTreeMap<Lang, String>,
     /// When the transcriptions were exported.
     exported: String,
 }
 
 impl Exports {
     fn download(downloads: &Downloads) -> Result<Self> {
-        let names: BTreeMap<String, String> =
+        let names: BTreeMap<Lang, String> =
             serde_json::from_str(LANGUAGE_NAMES).map_err(Error::LanguageNames)?;
         let mut exports = Exports {
             names,
@@ -322,7 +322,9 @@ impl Exports {
             let [id, _lang, text, ..] = f else {
                 return Err(RowError::Short(f.len()));
             };
-            exports.texts.insert(parse_id(id)?, text.to_string());
+            exports
+                .texts
+                .insert(parse_id(id, SentenceId)?, text.to_string());
             Ok(())
         })?;
         let transcriptions = "jpn/jpn_transcriptions.tsv.bz2";
@@ -333,7 +335,7 @@ impl Exports {
             // "A transcription without a username has not been marked as
             // reviewed" (tatoeba.org/en/downloads).
             if !(user.is_empty() || *user == "\\N") {
-                let id = parse_id(id)?;
+                let id = parse_id(id, SentenceId)?;
                 exports.transcriptions.insert(id, transcription.to_string());
             }
             Ok(())
@@ -345,11 +347,11 @@ impl Exports {
                 let [id, audio, author, ..] = f else {
                     return Err(RowError::Short(f.len()));
                 };
-                let audio = RawAudio {
-                    id: parse_id(audio)?,
+                let audio = Audio {
+                    id: parse_id(audio, AudioId)?,
                     author: author.to_string(),
                 };
-                exports.audio.insert(parse_id(id)?, audio);
+                exports.audio.insert(parse_id(id, SentenceId)?, audio);
                 Ok(())
             },
         )?;
@@ -370,7 +372,7 @@ impl Exports {
         // Workers take the next language by index; each returns what it
         // found.
         let next = AtomicUsize::new(0);
-        let wanted: HashSet<u32> = exports.transcriptions.keys().copied().collect();
+        let wanted: HashSet<SentenceId> = exports.transcriptions.keys().copied().collect();
         let mut found = Vec::new();
         thread::scope(|scope| {
             let workers: Vec<_> = (0..WORKERS)
@@ -396,7 +398,7 @@ impl Exports {
                 // Several translations into one language: the last wins, as
                 // upstream.
                 let entry = exports.translations.entry(id).or_default();
-                entry.insert(lang.to_string(), text);
+                entry.insert(Lang::new(lang), text);
             }
         }
         Ok(exports)
@@ -423,19 +425,22 @@ fn linked_languages(listing: &str) -> Vec<&str> {
 fn translations(
     downloads: &Downloads,
     lang: &str,
-    wanted: &HashSet<u32>,
-) -> Result<Vec<(u32, String)>> {
+    wanted: &HashSet<SentenceId>,
+) -> Result<Vec<(SentenceId, String)>> {
     // Translation id → the Japanese sentences it translates.
-    let mut links: HashMap<u32, Vec<u32>> = HashMap::new();
+    let mut links: HashMap<SentenceId, Vec<SentenceId>> = HashMap::new();
     tsv(
         &downloads.get(&format!("jpn/jpn-{lang}_links.tsv.bz2"))?,
         |f| {
             let [jpn, other, ..] = f else {
                 return Err(RowError::Short(f.len()));
             };
-            let jpn = parse_id(jpn)?;
+            let jpn = parse_id(jpn, SentenceId)?;
             if wanted.contains(&jpn) {
-                links.entry(parse_id(other)?).or_default().push(jpn);
+                links
+                    .entry(parse_id(other, SentenceId)?)
+                    .or_default()
+                    .push(jpn);
             }
             Ok(())
         },
@@ -447,7 +452,7 @@ fn translations(
             let [id, _lang, text, ..] = f else {
                 return Err(RowError::Short(f.len()));
             };
-            for &jpn in links.get(&parse_id(id)?).into_iter().flatten() {
+            for &jpn in links.get(&parse_id(id, SentenceId)?).into_iter().flatten() {
                 found.push((jpn, text.to_string()));
             }
             Ok(())
@@ -482,7 +487,7 @@ type Skipped = BTreeMap<Skip, (usize, String)>;
 /// The sentences to ship with their readings, in shuffled order.
 fn build(exports: &Exports) -> (Vec<(RawSentence, Vec<String>)>, Skipped) {
     let mut kept: Vec<(RawSentence, Vec<String>)> = Vec::new();
-    let mut skipped: BTreeMap<Skip, (usize, u32, String)> = BTreeMap::new();
+    let mut skipped: BTreeMap<Skip, (usize, SentenceId, String)> = BTreeMap::new();
     for (&id, transcription) in &exports.transcriptions {
         match check(exports, id, transcription) {
             Ok(entry) => kept.push(entry),
@@ -511,7 +516,7 @@ fn build(exports: &Exports) -> (Vec<(RawSentence, Vec<String>)>, Skipped) {
 
 fn check(
     exports: &Exports,
-    id: u32,
+    id: SentenceId,
     transcription: &str,
 ) -> std::result::Result<(RawSentence, Vec<String>), (Skip, String)> {
     let text = exports
@@ -528,7 +533,7 @@ fn check(
     if text.contains(UNSUPPORTED) {
         return Err((Skip::UnsupportedKana, text.clone()));
     }
-    let (translations, too_long): (BTreeMap<String, String>, BTreeMap<String, String>) = exports
+    let (translations, too_long): (BTreeMap<Lang, String>, BTreeMap<Lang, String>) = exports
         .translations
         .get(&id)
         .into_iter()
@@ -578,7 +583,7 @@ fn write(out: &Path, sentences: &[(RawSentence, Vec<String>)], exports: &Exports
     let mut languages: Vec<Language> = translated_languages(sentences.iter().map(|(raw, _)| raw))
         .into_iter()
         .map(|lang| Language {
-            lang: lang.to_string(),
+            lang: lang.clone(),
             name: exports.names[lang].clone(),
         })
         .collect();
@@ -629,28 +634,30 @@ mod tests {
 
     fn exports() -> Exports {
         let mut e = Exports {
-            names: [("eng".to_string(), "English".to_string())].into(),
+            names: [(Lang::english(), "English".to_string())].into(),
             ..Exports::default()
         };
-        let mut add = |id: u32, text: &str, transcription: &str, translated: bool| {
+        let mut add = |id: SentenceId, text: &str, transcription: &str, translated: bool| {
             e.texts.insert(id, text.into());
             e.transcriptions.insert(id, transcription.into());
             if translated {
-                let t = [("eng".to_string(), "…".to_string())].into();
+                let t = [(Lang::english(), "…".to_string())].into();
                 e.translations.insert(id, t);
             }
         };
-        add(1, "日本です。", "[日本|に|ほん]です。", true);
-        add(2, "猫です。", "[猫|ねこ]です。", false);
-        add(3, "犬です。", "[猫|ねこ]です。", true);
-        add(4, "一ヶ月。", "[一|いっ]ヶ[月|げつ]。", true);
-        add(5, "はい、そうです。", "はい、そうです。", true);
-        add(6, "ふ ふ", "ふ ふ", true);
-        add(7, "♪", "♪", true);
-        add(9, "長いです。", "[長|なが]いです。", false);
-        e.transcriptions.insert(8, "[消|け]した。".into());
+        add(SentenceId(1), "日本です。", "[日本|に|ほん]です。", true);
+        add(SentenceId(2), "猫です。", "[猫|ねこ]です。", false);
+        add(SentenceId(3), "犬です。", "[猫|ねこ]です。", true);
+        add(SentenceId(4), "一ヶ月。", "[一|いっ]ヶ[月|げつ]。", true);
+        add(SentenceId(5), "はい、そうです。", "はい、そうです。", true);
+        add(SentenceId(6), "ふ ふ", "ふ ふ", true);
+        add(SentenceId(7), "♪", "♪", true);
+        add(SentenceId(9), "長いです。", "[長|なが]いです。", false);
+        e.transcriptions
+            .insert(SentenceId(8), "[消|け]した。".into());
         let long = "x".repeat(MAX_TRANSLATION + 1);
-        e.translations.insert(9, [("eng".to_string(), long)].into());
+        e.translations
+            .insert(SentenceId(9), [(Lang::english(), long)].into());
         e
     }
 
@@ -658,10 +665,10 @@ mod tests {
     fn keeps_checked_sentences_and_says_why_not() {
         let e = exports();
         let (kept, skipped) = build(&e);
-        let ids: Vec<u32> = kept.iter().map(|(raw, _)| raw.id).collect();
+        let ids: Vec<SentenceId> = kept.iter().map(|(raw, _)| raw.id).collect();
         assert_eq!(ids.len(), 2);
-        assert!(ids.contains(&1) && ids.contains(&5));
-        let first = kept.iter().find(|(raw, _)| raw.id == 1);
+        assert!(ids.contains(&SentenceId(1)) && ids.contains(&SentenceId(5)));
+        let first = kept.iter().find(|(raw, _)| raw.id == SentenceId(1));
         assert_eq!(
             first.map(|(raw, readings)| (raw.translations["eng"].as_str(), readings.as_slice())),
             Some(("…", ["日本|にほん".to_string()].as_slice()))

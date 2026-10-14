@@ -6,14 +6,15 @@
 
 use std::collections::BTreeMap;
 
-use crate::sentence::{Audio, ParseError, Sentence};
+use crate::lang::Lang;
+use crate::sentence::{Audio, AudioId, ParseError, Sentence, SentenceId};
 
 struct Fixture {
-    id: Option<&'static str>,
+    id: Option<SentenceId>,
     transcription: &'static str,
     english: &'static str,
     /// (Tatoeba audio id, speaker)
-    audio: Option<(&'static str, &'static str)>,
+    audio: Option<(AudioId, &'static str)>,
 }
 
 const STARTER: Fixture = Fixture {
@@ -26,51 +27,51 @@ const STARTER: Fixture = Fixture {
 const FIXTURES: &[Fixture] = &[
     STARTER,
     Fixture {
-        id: Some("78642"),
+        id: Some(SentenceId(78642)),
         transcription:
             "[来週|らい|しゅう]の[日曜日|にち|よう|び]に[遊|あそ]びに[来|き]てください。",
         english: "Come and see me on Sunday next week.",
-        audio: Some(("12200", "huizi99")),
+        audio: Some((AudioId(12200), "huizi99")),
     },
     Fixture {
-        id: Some("4754"),
+        id: Some(SentenceId(4754)),
         transcription: "[急|いそ]いで！",
         english: "Step on it!",
-        audio: Some(("1686", "yomi")),
+        audio: Some((AudioId(1686), "yomi")),
     },
     Fixture {
-        id: Some("6018"),
+        id: Some(SentenceId(6018)),
         transcription: "[暇|ひま]だったら、[手伝|て|つだ]ってください。",
         english: "If you are free, give me a hand.",
-        audio: Some(("1968", "huizi99")),
+        audio: Some((AudioId(1968), "huizi99")),
     },
     Fixture {
-        id: Some("78157"),
+        id: Some(SentenceId(78157)),
         transcription: "[旅行|りょ|こう]は[楽|たの]しかったですか。",
         english: "Did you enjoy your trip?",
-        audio: Some(("12197", "Mizu")),
+        audio: Some((AudioId(12197), "Mizu")),
     },
     Fixture {
-        id: Some("5064"),
+        id: Some(SentenceId(5064)),
         transcription: "[一晩|ひと|ばん][泊|と]めてもらいたいんだけど。",
         english: "I'd like to stay for one night.",
-        audio: Some(("1690", "yomi")),
+        audio: Some((AudioId(1690), "yomi")),
     },
     Fixture {
-        id: Some("80023"),
+        id: Some(SentenceId(80023)),
         transcription: "[目|め]がゴロゴロします。",
         english: "My eyes feel gritty.",
-        audio: Some(("12204", "Mizu")),
+        audio: Some((AudioId(12204), "Mizu")),
     },
 ];
 
 impl Fixture {
     fn parse(&self) -> Result<Sentence, ParseError> {
         let audio = self.audio.map(|(id, author)| Audio {
-            id: id.into(),
+            id,
             author: author.into(),
         });
-        let translations = BTreeMap::from([("eng".to_string(), self.english.to_string())]);
+        let translations = BTreeMap::from([(Lang::english(), self.english.to_string())]);
         Sentence::parse(self.id, self.transcription, translations, audio)
     }
 }

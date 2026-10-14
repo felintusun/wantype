@@ -8,7 +8,7 @@
 
 use leptos::ev::PointerEvent;
 use leptos::prelude::*;
-use wantype_core::flick::{Flick, Pad, FLICKS, PAD};
+use wantype_core::flick::{Flick, Gesture, Pad, FLICKS, PAD};
 use wantype_core::{Event, Session};
 use wasm_bindgen::JsCast;
 
@@ -63,17 +63,17 @@ pub fn Phone(
         genko::view(lines, width, segments, Signal::stored(None))
     };
 
-    // The key and flick to make next, with the key hint on.
+    // The gesture to make next, with the key hint on.
     let hint = Memo::new(move |_| {
         helpers
             .with(|h| h.hint)
             .then(|| session.with(Session::flick_hint))
             .flatten()
     });
-    let on_flick = Callback::new(move |(pad, flick): (Pad, Flick)| {
+    let on_flick = Callback::new(move |gesture: Gesture| {
         // The first run's choice comes first, as with the keyboard.
         if session.with_untracked(|s| s.settings().mode.is_some()) {
-            app.dispatch(Event::Flick(pad, flick));
+            app.dispatch(Event::Flick(gesture));
         }
     });
 
@@ -118,9 +118,9 @@ pub fn Phone(
 #[component]
 fn PadKey(
     pad: Pad,
-    /// The key and flick to make next, if hinted.
-    hint: Memo<Option<(Pad, Flick)>>,
-    on_flick: Callback<(Pad, Flick)>,
+    /// The gesture to make next, if hinted.
+    hint: Memo<Option<Gesture>>,
+    on_flick: Callback<Gesture>,
 ) -> impl IntoView {
     // Where the touch began, and where it is going.
     let start = StoredValue::new(None::<(f64, f64)>);
@@ -136,8 +136,8 @@ fn PadKey(
     };
     let hinted = move || {
         hint.get()
-            .filter(|&(hinted, _)| hinted == pad)
-            .map(|(_, flick)| way(flick))
+            .filter(|hinted| hinted.pad == pad)
+            .map(|hinted| way(hinted.flick))
     };
     let labels = FLICKS
         .into_iter()
@@ -172,7 +172,7 @@ fn PadKey(
             }
             on:pointerup=move |e: PointerEvent| {
                 if let Some(flick) = motion(&e) {
-                    on_flick.run((pad, flick));
+                    on_flick.run(pad.flick(flick));
                 }
                 release();
             }

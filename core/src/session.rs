@@ -12,10 +12,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::flick::{Composer, Flick, Pad};
+use crate::flick::{Composer, Gesture};
 use crate::ladder::{self, Helper, Helpers, Ladder, Mode, Numerals, Outcome, Recorded, Tier};
+use crate::lang::Lang;
 use crate::matcher::Matcher;
-use crate::sentence::{segments, Audio, Segment, Sentence, FALLBACK_LANGUAGE};
+use crate::sentence::{segments, Audio, Segment, Sentence};
 use crate::slip::Slip;
 use crate::tatoeba::Filter;
 
@@ -63,7 +64,7 @@ pub struct Modifiers {
 pub enum Event {
     Key(Key, Modifiers),
     /// A gesture on the flick pad (a phone's keyboard).
-    Flick(Pad, Flick),
+    Flick(Gesture),
     /// Answer to [`Effect::RequestSentence`].
     SentenceLoaded(Sentence),
     /// [`Effect::RequestSentence`] could not be fulfilled (e.g. no sentence
@@ -88,18 +89,18 @@ pub enum Event {
     KeepHelper,
     /// Bring back the helper offered after a rough sentence, or not.
     TakeOffer(bool),
-    /// Translation language (Tatoeba code; `""` shows no translation).
+    /// Translation language.
     /// Choosing one also turns translations on, as upstream does. A sentence
     /// without one in it shows the English one.
-    SetLanguage(String),
+    SetLanguage(Lang),
     /// The translation languages the data has, and the one the browser
     /// prefers among them (`tatoeba::browser_language`). A first run
     /// ([`Session::first_run`]) takes the browser's; a saved language the
     /// data lacks (say, one dropped from Tatoeba's exports) falls back to
-    /// the default one, or to none.
+    /// English.
     LanguagesLoaded {
-        available: Vec<String>,
-        browser: Option<String>,
+        available: Vec<Lang>,
+        browser: Option<Lang>,
     },
     /// Turning audio on plays the current recording, or moves on to the
     /// next sentence if this one has none.
@@ -159,8 +160,8 @@ pub enum SavedError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
-    /// Translation language (Tatoeba code), `""` for none.
-    pub language: String,
+    /// Translation language. (Turning translations off is the helper's.)
+    pub language: Lang,
     pub translation_enabled: bool,
     pub furigana: bool,
     /// Show the key to type next, while furigana are shown (without them
@@ -184,7 +185,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            language: FALLBACK_LANGUAGE.into(),
+            language: Lang::english(),
             translation_enabled: true,
             furigana: true,
             hint: true,
@@ -264,7 +265,7 @@ impl Settings {
         };
         Helpers {
             hint: on(Helper::Hint) && on(Helper::Furigana),
-            translation: on(Helper::Translation) && !self.language.is_empty(),
+            translation: on(Helper::Translation),
             furigana: on(Helper::Furigana),
         }
     }
@@ -383,7 +384,7 @@ impl Session {
     pub fn handle(&mut self, event: Event, now: Duration) {
         match event {
             Event::Key(key, mods) => self.handle_key(key, mods, now),
-            Event::Flick(pad, flick) => self.flick(pad, flick, now),
+            Event::Flick(gesture) => self.flick(gesture, now),
             Event::SentenceLoaded(sentence) => self.load(sentence),
             Event::SentenceFailed => self.loading = false,
             Event::Next => self.request_sentence(),
@@ -433,19 +434,13 @@ impl Session {
             Event::LanguagesLoaded { available, browser } => {
                 let first_run = std::mem::take(&mut self.first_run);
                 let language = &self.settings.language;
-                let wanted = match browser {
+                let change = match browser {
                     Some(browser) if first_run && available.contains(&browser) => Some(browser),
-                    _ if !language.is_empty() && !available.contains(language) => {
-                        let default = Settings::default().language;
-                        Some(match available.contains(&default) {
-                            true => default,
-                            false => String::new(),
-                        })
-                    }
+                    _ if !available.contains(language) => Some(Lang::english()),
                     _ => None,
                 };
-                if let Some(wanted) = wanted.filter(|l| l != language) {
-                    self.change_settings(|s| s.language = wanted);
+                if let Some(language) = change.filter(|l| l != language) {
+                    self.change_settings(|s| s.language = language);
                 }
             }
             Event::SetMincho(on) => self.change_settings(|s| s.mincho = on),
@@ -518,11 +513,9 @@ impl Session {
     }
 
     /// A gesture types what the composer lets through ([`Composer::input`]).
-    fn flick(&mut self, pad: Pad, flick: Flick, now: Duration) {
+    fn flick(&mut self, gesture: Gesture, now: Duration) {
         let Some(round) = &mut self.round else { return };
-        let keys = round
-            .composer
-            .input(pad, flick, round.matcher.current_kana());
+        let keys = round.composer.input(gesture, round.matcher.current_kana());
         for key in keys.chars() {
             self.type_char(key, now);
         }
@@ -723,7 +716,7 @@ impl Session {
 
     /// The gesture on the flick pad that brings the kana at the cursor
     /// closer; `None` when completed or without a sentence.
-    pub fn flick_hint(&self) -> Option<(Pad, Flick)> {
+    pub fn flick_hint(&self) -> Option<Gesture> {
         let round = self.round.as_ref()?;
         round.composer.hint(round.matcher.current_kana())
     }
@@ -762,6 +755,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::flick::{Flick, Pad};
+    use crate::sentence::AudioId;
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
@@ -777,7 +772,7 @@ mod tests {
 
     fn sentence(transcription: &str, audio: bool) -> TestResult<Sentence> {
         let audio = audio.then(|| Audio {
-            id: "1".into(),
+            id: AudioId(1),
             author: "a".into(),
         });
         Ok(Sentence::parse(
@@ -819,13 +814,13 @@ mod tests {
         let mut s = loaded("ちゃ", false)?;
         // ち, then や held for ゃ.
         let hold = |s: &mut Session| {
-            for (pad, flick) in [(Pad::Ta, Flick::Left), (Pad::Ya, Flick::Tap)] {
-                s.handle(Event::Flick(pad, flick), ms(0));
+            for gesture in [Pad::Ta.flick(Flick::Left), Pad::Ya.tap()] {
+                s.handle(Event::Flick(gesture), ms(0));
             }
         };
         hold(&mut s);
         assert_eq!(s.held(), Some('や'));
-        assert_eq!(s.flick_hint(), Some((Pad::Turn, Flick::Tap)));
+        assert_eq!(s.flick_hint(), Some(Gesture::TURN));
         // A retry, or a new sentence, drops it.
         s.handle(Event::Restart, ms(0));
         assert_eq!(s.held(), None);
@@ -833,7 +828,7 @@ mod tests {
         s.handle(Event::SentenceLoaded(sentence("ちゃ", false)?), ms(0));
         assert_eq!(s.held(), None);
         hold(&mut s);
-        s.handle(Event::Flick(Pad::Turn, Flick::Tap), ms(0));
+        s.handle(Event::Flick(Gesture::TURN), ms(0));
         assert!(s.completed());
         assert_eq!(s.stats().mistakes, 0);
         Ok(())
@@ -1068,9 +1063,9 @@ mod tests {
     fn choosing_a_language_turns_translations_on() -> TestResult {
         let mut s = loaded("か", false)?;
         s.handle(Event::SetHelper(Helper::Translation, false), ms(0));
-        s.handle(Event::SetLanguage("fra".into()), ms(0));
+        s.handle(Event::SetLanguage(lang("fra")), ms(0));
         assert!(s.settings().translation_enabled);
-        assert_eq!(s.settings().language, "fra");
+        assert_eq!(s.settings().language, lang("fra"));
         // Unchanged settings are not announced.
         effects(&mut s);
         s.handle(Event::SetMincho(false), ms(0));
@@ -1085,7 +1080,7 @@ mod tests {
             "audio": false, "mincho": true, "unknownReadings": 1, "knownReadings": ["日|に"],
         });
         let s: Settings = serde_json::from_value(stored)?;
-        assert_eq!(s.language, "fra");
+        assert_eq!(s.language, lang("fra"));
         assert!(!s.translation_enabled && s.mincho);
         assert_eq!(s.unknown_readings, Some(1));
         assert!(s.known_readings.contains("日|に"));
@@ -1110,14 +1105,14 @@ mod tests {
     fn a_language_the_sentence_lacks_keeps_it() -> TestResult {
         let mut s = Session::new(Settings::default());
         effects(&mut s);
-        let translations = BTreeMap::from([("deu".to_string(), "Katze".to_string())]);
+        let translations = BTreeMap::from([(Lang::new("deu"), "Katze".to_string())]);
         let sentence = Sentence::parse(None, "ねこ", translations, None)?;
         s.handle(Event::SentenceLoaded(sentence), ms(0));
         effects(&mut s);
-        s.handle(Event::SetLanguage("deu".into()), ms(0));
+        s.handle(Event::SetLanguage(lang("deu")), ms(0));
         assert_eq!(effects(&mut s), [Effect::SettingsChanged]);
         // No French: it stays, showing the English translation.
-        s.handle(Event::SetLanguage("fra".into()), ms(0));
+        s.handle(Event::SetLanguage(lang("fra")), ms(0));
         assert_eq!(effects(&mut s), [Effect::SettingsChanged]);
         Ok(())
     }
@@ -1125,27 +1120,34 @@ mod tests {
     #[test]
     fn an_unknown_language_falls_back() -> TestResult {
         let mut s = loaded("か", false)?;
-        s.handle(Event::SetLanguage("xyz".into()), ms(0));
+        s.handle(Event::SetLanguage(lang("xyz")), ms(0));
         s.handle(Event::SetHelper(Helper::Translation, false), ms(0));
         effects(&mut s);
         s.handle(loaded_languages(&["deu", "eng"], Some("deu")), ms(0));
-        assert_eq!(s.settings().language, "eng");
+        assert_eq!(s.settings().language, lang("eng"));
         // Only the language changes.
         assert!(!s.settings().translation_enabled);
         assert!(!effects(&mut s).is_empty());
-        // A known language, or none, stays.
+        // A known language stays.
         s.handle(loaded_languages(&["eng"], None), ms(0));
         assert!(effects(&mut s).is_empty());
-        s.handle(Event::SetLanguage("deu".into()), ms(0));
-        s.handle(loaded_languages(&["fra"], None), ms(0));
-        assert_eq!(s.settings().language, "");
+        // Upstream's "" (no translation) is just another code the data
+        // lacks: translations themselves are turned off with the helper.
+        let Restored { settings, .. } = Settings::from_saved(r#"{ "language": "" }"#);
+        let mut s = Session::new(settings);
+        s.handle(loaded_languages(&["deu", "eng"], None), ms(0));
+        assert_eq!(s.settings().language, lang("eng"));
         Ok(())
+    }
+
+    fn lang(code: &str) -> Lang {
+        Lang::new(code)
     }
 
     fn loaded_languages(available: &[&str], browser: Option<&str>) -> Event {
         Event::LanguagesLoaded {
-            available: available.iter().map(|l| l.to_string()).collect(),
-            browser: browser.map(String::from),
+            available: available.iter().map(|&l| Lang::new(l)).collect(),
+            browser: browser.map(Lang::new),
         }
     }
 
@@ -1154,15 +1156,15 @@ mod tests {
         let mut s = Session::first_run();
         // Not one the data lacks.
         s.handle(loaded_languages(&["eng"], Some("deu")), ms(0));
-        assert_eq!(s.settings().language, "eng");
+        assert_eq!(s.settings().language, lang("eng"));
         let mut s = Session::first_run();
         s.handle(loaded_languages(&["deu", "eng"], Some("deu")), ms(0));
-        assert_eq!(s.settings().language, "deu");
+        assert_eq!(s.settings().language, lang("deu"));
         // Only once: a later list keeps the player's choice. (Saved
         // settings never take it: see `an_unknown_language_falls_back`.)
-        s.handle(Event::SetLanguage("fra".into()), ms(0));
+        s.handle(Event::SetLanguage(lang("fra")), ms(0));
         s.handle(loaded_languages(&["deu", "eng", "fra"], Some("deu")), ms(0));
-        assert_eq!(s.settings().language, "fra");
+        assert_eq!(s.settings().language, lang("fra"));
     }
 
     #[test]
@@ -1174,7 +1176,7 @@ mod tests {
             settings: s,
             problems,
         } = Settings::from_saved(&saved.to_string());
-        assert_eq!(s.language, "deu");
+        assert_eq!(s.language, lang("deu"));
         assert_eq!(*s.known_readings, ["日|に".to_string()].into());
         // The malformed ones take their defaults, and are named.
         assert!(s.furigana && !s.audio);

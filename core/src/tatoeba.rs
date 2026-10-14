@@ -17,7 +17,8 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::sentence::{Audio, ParseError, Sentence};
+use crate::lang::Lang;
+use crate::sentence::{Audio, ParseError, Sentence, SentenceId};
 
 /// Bumped when the files change shape, so stale data gets rebuilt.
 pub const FORMAT: u32 = 1;
@@ -74,16 +75,16 @@ pub struct Index {
     /// Translation languages, by name.
     pub languages: Vec<Language>,
     /// Sentences with a recording.
-    pub audio: Ids,
+    pub audio: SortedIndices,
 }
 
 /// Sorted sentence indices, stored as the gaps between them (`[3, 1, 1, 5]`
 /// for 3, 4, 5, 10): runs of neighbours become runs of `1`, which compress
 /// to almost nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Ids(pub Vec<u32>);
+pub struct SortedIndices(pub Vec<u32>);
 
-impl Serialize for Ids {
+impl Serialize for SortedIndices {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut previous = 0;
         let gaps: Vec<u32> = self
@@ -99,7 +100,7 @@ impl Serialize for Ids {
     }
 }
 
-impl<'de> Deserialize<'de> for Ids {
+impl<'de> Deserialize<'de> for SortedIndices {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut sum = 0u32;
         Vec::<u32>::deserialize(deserializer)?
@@ -111,7 +112,7 @@ impl<'de> Deserialize<'de> for Ids {
                 Ok(sum)
             })
             .collect::<Result<_, _>>()
-            .map(Ids)
+            .map(SortedIndices)
     }
 }
 
@@ -157,44 +158,31 @@ impl Readings {
 /// One entry of a chunk file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawSentence {
-    /// Tatoeba sentence id.
-    pub id: u32,
+    pub id: SentenceId,
     /// e.g. `[今日|きょう]は…`.
     pub transcription: String,
     /// By Tatoeba language code.
     #[serde(default)]
-    pub translations: BTreeMap<String, String>,
+    pub translations: BTreeMap<Lang, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audio: Option<RawAudio>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RawAudio {
-    /// Tatoeba audio id.
-    pub id: u32,
-    /// The speaker's Tatoeba username.
-    pub author: String,
+    pub audio: Option<Audio>,
 }
 
 impl RawSentence {
     pub fn into_sentence(self) -> Result<Sentence, ParseError> {
-        let audio = self.audio.map(|a| Audio {
-            id: a.id.to_string(),
-            author: a.author,
-        });
         Sentence::parse(
-            Some(&self.id.to_string()),
+            Some(self.id),
             &self.transcription,
             self.translations,
-            audio,
+            self.audio,
         )
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Language {
-    /// Tatoeba code, e.g. `eng`.
-    pub lang: String,
+    /// e.g. `eng`.
+    pub lang: Lang,
     /// English name, e.g. `English`.
     pub name: String,
 }
@@ -253,20 +241,22 @@ pub fn candidates(indices: Indices, filter: Filter) -> Vec<u32> {
 
 /// Which sentences have a recording ([`Index::audio`]), from the chunks'
 /// sentences in index order.
-pub fn with_audio<'a>(sentences: impl IntoIterator<Item = &'a RawSentence>) -> Ids {
-    Ids((0..)
-        .zip(sentences)
-        .filter_map(|(i, raw)| raw.audio.is_some().then_some(i))
-        .collect())
+pub fn with_audio<'a>(sentences: impl IntoIterator<Item = &'a RawSentence>) -> SortedIndices {
+    SortedIndices(
+        (0..)
+            .zip(sentences)
+            .filter_map(|(i, raw)| raw.audio.is_some().then_some(i))
+            .collect(),
+    )
 }
 
 /// The languages the sentences have translations in ([`Index::languages`]).
 pub fn translated_languages<'a>(
     sentences: impl IntoIterator<Item = &'a RawSentence>,
-) -> BTreeSet<&'a str> {
+) -> BTreeSet<&'a Lang> {
     sentences
         .into_iter()
-        .flat_map(|raw| raw.translations.keys().map(String::as_str))
+        .flat_map(|raw| raw.translations.keys())
         .collect()
 }
 
@@ -278,18 +268,18 @@ pub fn translated_languages<'a>(
 pub fn browser_language<'a>(
     preferred: &[String],
     languages: &'a [Language],
-    tag: impl Fn(&str) -> String,
-) -> Option<&'a str> {
-    let tags: Vec<(String, &str)> = languages
+    tag: impl Fn(&Lang) -> String,
+) -> Option<&'a Lang> {
+    let tags: Vec<(String, &Lang)> = languages
         .iter()
-        .filter(|l| l.lang != "jpn")
-        .map(|l| (tag(&l.lang).to_ascii_lowercase(), l.lang.as_str()))
+        .filter(|l| !l.lang.is_japanese())
+        .map(|l| (tag(&l.lang).to_ascii_lowercase(), &l.lang))
         .collect();
     preferred.iter().find_map(|p| {
         let primary = p.split('-').next()?.to_ascii_lowercase();
         tags.iter()
             .find(|(tag, _)| *tag == primary)
-            .map(|&(_, code)| code)
+            .map(|&(_, lang)| lang)
     })
 }
 
@@ -365,6 +355,7 @@ impl Picker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sentence::AudioId;
     use crate::testing::{TestError, TestResult};
     use serde_json::json;
 
@@ -389,7 +380,7 @@ mod tests {
         }]);
         let raw: Vec<RawSentence> = serde_json::from_value(chunk)?;
         let s = raw[0].clone().into_sentence()?;
-        assert_eq!(s.id.as_deref(), Some("4705"));
+        assert_eq!(s.id, Some(SentenceId(4705)));
         assert_eq!(s.text(), "今日は誕生日です！");
         assert_eq!(s.translations["eng"], "Today is my birthday!");
         assert_eq!(s.audio.as_ref().map(|a| a.author.as_str()), Some("yomi"));
@@ -421,7 +412,7 @@ mod tests {
             exported: String::new(),
             sentences: 4,
             languages: vec![],
-            audio: Ids(vec![1, 3]),
+            audio: SortedIndices(vec![1, 3]),
         };
         let per_sentence = [
             vec![],
@@ -482,12 +473,18 @@ mod tests {
     }
 
     #[test]
-    fn ids_are_stored_as_gaps() -> TestResult {
-        let ids = Ids(vec![3, 4, 5, 10]);
-        assert_eq!(serde_json::to_value(&ids)?, json!([3, 1, 1, 5]));
-        assert_eq!(serde_json::from_value::<Ids>(json!([3, 1, 1, 5]))?, ids);
-        assert_eq!(serde_json::from_value::<Ids>(json!([0]))?, Ids(vec![0]));
-        assert!(serde_json::from_value::<Ids>(json!([u32::MAX, 1])).is_err());
+    fn indices_are_stored_as_gaps() -> TestResult {
+        let indices = SortedIndices(vec![3, 4, 5, 10]);
+        assert_eq!(serde_json::to_value(&indices)?, json!([3, 1, 1, 5]));
+        assert_eq!(
+            serde_json::from_value::<SortedIndices>(json!([3, 1, 1, 5]))?,
+            indices
+        );
+        assert_eq!(
+            serde_json::from_value::<SortedIndices>(json!([0]))?,
+            SortedIndices(vec![0])
+        );
+        assert!(serde_json::from_value::<SortedIndices>(json!([u32::MAX, 1])).is_err());
         Ok(())
     }
 
@@ -526,20 +523,21 @@ mod tests {
     #[test]
     fn lists_follow_the_chunks() {
         let raw = |translations: &[&str], audio: bool| RawSentence {
-            id: 1,
+            id: SentenceId(1),
             transcription: "はい。".into(),
             translations: translations
                 .iter()
-                .map(|l| (l.to_string(), "…".into()))
+                .map(|&l| (Lang::new(l), "…".into()))
                 .collect(),
-            audio: audio.then(|| RawAudio {
-                id: 1,
+            audio: audio.then(|| Audio {
+                id: AudioId(1),
                 author: "yomi".into(),
             }),
         };
         let sentences = [raw(&["eng"], true), raw(&["deu", "eng"], false)];
-        assert_eq!(with_audio(&sentences), Ids(vec![0]));
-        assert_eq!(translated_languages(&sentences), ["deu", "eng"].into());
+        assert_eq!(with_audio(&sentences), SortedIndices(vec![0]));
+        let [deu, eng] = ["deu", "eng"].map(Lang::new);
+        assert_eq!(translated_languages(&sentences), [&deu, &eng].into());
     }
 
     #[test]
@@ -547,12 +545,12 @@ mod tests {
         let languages: Vec<Language> = ["cmn", "deu", "eng", "jpn", "yue"]
             .into_iter()
             .map(|lang| Language {
-                lang: lang.into(),
+                lang: Lang::new(lang),
                 name: String::new(),
             })
             .collect();
         // As the browser canonicalizes them.
-        let tag = |code: &str| match code {
+        let tag = |lang: &Lang| match lang.as_str() {
             "cmn" => "zh".to_string(),
             "deu" => "de".to_string(),
             "eng" => "en".to_string(),
@@ -561,7 +559,7 @@ mod tests {
         };
         let pick = |preferred: &[&str]| {
             let preferred: Vec<String> = preferred.iter().map(|p| p.to_string()).collect();
-            browser_language(&preferred, &languages, tag).map(str::to_string)
+            browser_language(&preferred, &languages, tag).map(Lang::to_string)
         };
         assert_eq!(pick(&["de-AT", "en"]).as_deref(), Some("deu"));
         assert_eq!(pick(&["zh-TW"]).as_deref(), Some("cmn"));

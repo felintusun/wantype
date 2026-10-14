@@ -18,6 +18,7 @@ mod compat;
 pub mod fixtures;
 pub mod flick;
 pub mod ladder;
+mod lang;
 mod matcher;
 mod rules;
 mod sentence;
@@ -29,8 +30,12 @@ mod testing;
 
 pub use chars::fold;
 pub use ladder::{Grade, Helper, Helpers, Ladder, Mode, Numerals, Outcome, Tier};
+pub use lang::Lang;
 pub use matcher::{Matcher, RomajiError};
-pub use sentence::{segments, Audio, ParseError, Part, Progress, Segment, Sentence, Target};
+pub use sentence::{
+    segments, Audio, AudioId, ParseError, Part, Progress, Segment, Sentence, SentenceId, Target,
+    Translation,
+};
 pub use session::{
     wpm, Effect, Event, Key, Modifiers, Restored, SavedError, Session, Settings, Stats,
 };

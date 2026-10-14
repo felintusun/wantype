@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use base64::Engine;
 use sha2::{Digest, Sha256};
-use wantype_core::Audio;
+use wantype_core::AudioId;
 
 use crate::{at, IoError};
 
@@ -42,7 +42,7 @@ pub fn csp() -> Result<(), Error> {
 /// - scripts: its own, wasm, and Trunk's inline loader by hash;
 /// - the sentence data from its own origin; styles and images likewise
 ///   (system fonts need no source);
-/// - recordings from wherever [`Audio::urls`] points.
+/// - recordings from wherever [`AudioId::urls`] points.
 ///
 /// No Trusted Types: Leptos' `view!` builds static elements from the HTML
 /// it generates at compile time, through `innerHTML` on a `<template>`.
@@ -58,13 +58,9 @@ fn policy(inline_scripts: &[&str]) -> String {
             format!(" 'sha256-{hash}'")
         })
         .collect();
-    let audio = Audio {
-        id: "0".into(),
-        author: String::new(),
-    };
     // Each URL's origin: `https://host`.
     let mut media: Vec<String> = Vec::new();
-    for url in audio.urls() {
+    for url in AudioId(0).urls() {
         let origin = url.splitn(4, '/').take(3).collect::<Vec<_>>().join("/");
         if !media.contains(&origin) {
             media.push(origin);

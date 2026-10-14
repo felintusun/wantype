@@ -12,7 +12,7 @@
 
 use wana_kana::utils::katakana_to_hiragana;
 
-use crate::chars::{fold, single};
+use crate::chars::{fold, single, split_voiced};
 use crate::compat::VOICED;
 use crate::matcher::Matcher;
 use crate::rules::kana_keys;
@@ -95,7 +95,35 @@ pub const FLICKS: [Flick; 5] = [
     Flick::Down,
 ];
 
+/// A touch on the pad: the key, and how the touch left it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Gesture {
+    pub pad: Pad,
+    pub flick: Flick,
+}
+
+impl Gesture {
+    /// A tap on ゛゜小.
+    pub const TURN: Gesture = Pad::Turn.tap();
+
+    /// What the gesture types; `None` for ゛゜小 or a flick toward nothing.
+    /// ([`Flick`] is declared in [`FLICKS`] order.)
+    pub fn char(self) -> Option<char> {
+        self.pad.chars().get(self.flick as usize).copied().flatten()
+    }
+}
+
 impl Pad {
+    /// A tap on this key.
+    pub const fn tap(self) -> Gesture {
+        self.flick(Flick::Tap)
+    }
+
+    /// A flick (or tap) on this key.
+    pub const fn flick(self, flick: Flick) -> Gesture {
+        Gesture { pad: self, flick }
+    }
+
     /// What each flick types, in [`FLICKS`] order; `None` where the key
     /// has nothing that way. ゛゜小 types nothing of its own: it turns.
     pub fn chars(self) -> [Option<char>; 5] {
@@ -114,12 +142,6 @@ impl Pad {
             Pad::Wa => [Some('わ'), Some('を'), Some('ん'), Some('ー'), None],
             Pad::Marks => row(['、', '。', '？', '！', '・']),
         }
-    }
-
-    /// What `flick` types on this key ([`Flick`] is declared in [`FLICKS`]
-    /// order).
-    pub fn char(self, flick: Flick) -> Option<char> {
-        self.chars().get(flick as usize).copied().flatten()
     }
 }
 
@@ -153,7 +175,8 @@ fn turns(kana: char) -> impl Iterator<Item = char> + Clone {
 
 /// Whether ゛゜小 turns `kana` into `to` (or it is `to` already).
 fn turns_into(kana: char, to: char) -> bool {
-    turns(kana).any(|k| k == to)
+    // A lookup, not a scan of [`turns`]: hints ask for every key.
+    to == kana || small(kana) == Some(to) || split_voiced(to).is_some_and(|(base, _)| base == kana)
 }
 
 /// `kana` turned `n` times.
@@ -195,12 +218,12 @@ impl Composer {
         self.held = None;
     }
 
-    /// The keys `flick` on `pad` types now, `target` being the kana at the
-    /// cursor ([`Event::Flick`](crate::Event::Flick)). Empty
-    /// while a kana is held back, or for a flick toward nothing.
-    pub fn input(&mut self, pad: Pad, flick: Flick, target: Option<char>) -> String {
+    /// The keys `gesture` types now, `target` being the kana at the cursor
+    /// ([`Event::Flick`](crate::Event::Flick)). Empty while a kana is held
+    /// back, or for a flick toward nothing.
+    pub fn input(&mut self, gesture: Gesture, target: Option<char>) -> String {
         let target = target.map(plain);
-        if pad == Pad::Turn {
+        if gesture.pad == Pad::Turn {
             let Some((kana, n)) = self.held.take() else {
                 return STRAY.to_string();
             };
@@ -211,7 +234,7 @@ impl Composer {
             self.held = Some((kana, n + 1));
             return String::new();
         }
-        let Some(c) = pad.char(flick) else {
+        let Some(c) = gesture.char() else {
             return String::new();
         };
         let mut typed = self
@@ -229,14 +252,14 @@ impl Composer {
 
     /// The gesture that brings `target`, the kana at the cursor, closer:
     /// ゛゜小 for the kana held back, else the key and flick of its row.
-    pub fn hint(&self, target: Option<char>) -> Option<(Pad, Flick)> {
+    pub fn hint(&self, target: Option<char>) -> Option<Gesture> {
         let t = plain(target?);
         if self.held.is_some_and(|(kana, _)| turns_into(kana, t)) {
-            return Some((Pad::Turn, Flick::Tap));
+            return Some(Gesture::TURN);
         }
         PAD.iter()
-            .flat_map(|&pad| FLICKS.map(|flick| (pad, flick)))
-            .find(|&(pad, flick)| pad.char(flick).map(fold).is_some_and(|c| turns_into(c, t)))
+            .flat_map(|&pad| FLICKS.map(|flick| pad.flick(flick)))
+            .find(|gesture| gesture.char().map(fold).is_some_and(|c| turns_into(c, t)))
     }
 }
 
@@ -251,14 +274,14 @@ pub enum FlickError {
 
 /// The gestures that type `text` (kana) by following the hint, or why it
 /// cannot be flicked.
-pub fn gestures(text: &str) -> Result<Vec<(Pad, Flick)>, FlickError> {
+pub fn gestures(text: &str) -> Result<Vec<Gesture>, FlickError> {
     let mut matcher = Matcher::new(text);
     let mut composer = Composer::default();
     let mut done = Vec::new();
     while let Some(at) = matcher.current_kana() {
-        let (pad, flick) = composer.hint(Some(at)).ok_or(FlickError::NoKey(at))?;
-        done.push((pad, flick));
-        let typed = composer.input(pad, flick, Some(at));
+        let gesture = composer.hint(Some(at)).ok_or(FlickError::NoKey(at))?;
+        done.push(gesture);
+        let typed = composer.input(gesture, Some(at));
         // Every kana takes at most three gestures (は, ゛, ゜).
         if !typed.chars().all(|key| matcher.input(key)) || done.len() > 3 * matcher.len() {
             return Err(FlickError::Stuck(at));
@@ -289,21 +312,22 @@ mod tests {
     fn turns_follow_the_hint() -> TestResult {
         use Flick::*;
         use Pad::*;
+        let turn = Gesture::TURN;
         assert_eq!(
             gestures("ぱっちゃ")?,
             [
-                (Ha, Tap),
-                (Turn, Tap),
-                (Turn, Tap),
-                (Ta, Up),
-                (Turn, Tap),
-                (Ta, Left),
-                (Ya, Tap),
-                (Turn, Tap)
+                Ha.tap(),
+                turn,
+                turn,
+                Ta.flick(Up),
+                turn,
+                Ta.flick(Left),
+                Ya.tap(),
+                turn
             ]
         );
         // Katakana with the same keys; ー is on わ.
-        assert_eq!(gestures("ガー")?, [(Ka, Tap), (Turn, Tap), (Wa, Right)]);
+        assert_eq!(gestures("ガー")?, [Ka.tap(), turn, Wa.flick(Right)]);
         Ok(())
     }
 
@@ -311,25 +335,25 @@ mod tests {
     fn a_kana_is_held_only_while_it_can_still_turn_into_the_target() {
         let mut c = Composer::default();
         // や for ゃ: held, shown, then turned and passed on.
-        assert_eq!(c.input(Pad::Ya, Flick::Tap, Some('ゃ')), "");
+        assert_eq!(c.input(Pad::Ya.tap(), Some('ゃ')), "");
         assert_eq!(c.held(), Some('や'));
-        assert_eq!(c.input(Pad::Turn, Flick::Tap, Some('ゃ')), "ゃ");
+        assert_eq!(c.input(Gesture::TURN, Some('ゃ')), "ゃ");
         assert_eq!(c.held(), None);
         // は for ぱ: ば on the way is held too.
-        assert_eq!(c.input(Pad::Ha, Flick::Tap, Some('ぱ')), "");
-        assert_eq!(c.input(Pad::Turn, Flick::Tap, Some('ぱ')), "");
+        assert_eq!(c.input(Pad::Ha.tap(), Some('ぱ')), "");
+        assert_eq!(c.input(Gesture::TURN, Some('ぱ')), "");
         assert_eq!(c.held(), Some('ば'));
-        assert_eq!(c.input(Pad::Turn, Flick::Tap, Some('ぱ')), "は゜");
+        assert_eq!(c.input(Gesture::TURN, Some('ぱ')), "は゜");
         // A right kana goes at once, a wrong one too.
-        assert_eq!(c.input(Pad::Sa, Flick::Tap, Some('さ')), "さ");
-        assert_eq!(c.input(Pad::Ka, Flick::Tap, Some('さ')), "か");
+        assert_eq!(c.input(Pad::Sa.tap(), Some('さ')), "さ");
+        assert_eq!(c.input(Pad::Ka.tap(), Some('さ')), "か");
         // Another key passes on what was held, as it stands.
-        assert_eq!(c.input(Pad::Ka, Flick::Tap, Some('が')), "");
-        assert_eq!(c.input(Pad::Sa, Flick::Tap, Some('が')), "かさ");
+        assert_eq!(c.input(Pad::Ka.tap(), Some('が')), "");
+        assert_eq!(c.input(Pad::Sa.tap(), Some('が')), "かさ");
         // A turn with nothing held is a wrong key; a flick toward nothing
         // types nothing.
-        assert_eq!(c.input(Pad::Turn, Flick::Tap, Some('か')), "゛");
-        assert_eq!(c.input(Pad::Wa, Flick::Down, Some('か')), "");
+        assert_eq!(c.input(Gesture::TURN, Some('か')), "゛");
+        assert_eq!(c.input(Pad::Wa.flick(Flick::Down), Some('か')), "");
     }
 
     #[test]
