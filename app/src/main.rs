@@ -27,8 +27,8 @@ use wantype_core::tatoeba::{self, Language};
 // Renamed: Leptos has its own `Effect`.
 use wantype_core::Effect as Fx;
 use wantype_core::{
-    fixtures, Event, Helper, Key, Mode, Modifiers, Numerals, Outcome, Restored, Session, Settings,
-    Slip, SlipKind, Tier,
+    fixtures, Event, Helper, Helpers, Key, Mode, Modifiers, Numerals, Outcome, Restored, Segment,
+    Session, Settings, Slip, SlipKind, Tier,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -273,6 +273,8 @@ struct Refs {
 struct App {
     session: RwSignal<Session>,
     store: data::Store,
+    /// The translation languages; a failed list says why in the options.
+    languages: RwSignal<Result<Vec<Language>, Arc<data::DataError>>>,
     /// The recording the `<audio>` element has its sources for.
     loaded: StoredValue<Option<wantype_core::Audio>, LocalStorage>,
     /// The last sentence request failed, and why (shown in its place).
@@ -293,9 +295,149 @@ struct App {
     starter_pending: StoredValue<bool>,
     start: Instant,
     refs: Refs,
+    /// What both layouts show, narrowed from the session.
+    view: Shown,
+}
+
+/// Narrow memos over the session, shared by the layouts: the session
+/// changes on every key, these only when what they hold does. (Copying the
+/// settings shares their known readings.)
+#[derive(Clone, Copy)]
+struct Shown {
+    sentence: Memo<Option<wantype_core::Sentence>>,
+    segments: Memo<Vec<Segment>>,
+    settings: Memo<Settings>,
+    helpers: Memo<Helpers>,
+    completed: Memo<bool>,
+    /// The translation shown, in the chosen language or else in English,
+    /// with its HTML `lang`; `None` without a language or a translation.
+    translation: Memo<Option<(String, String)>>,
+}
+
+impl Shown {
+    fn new(session: RwSignal<Session>) -> Shown {
+        let sentence = Memo::new(move |_| session.with(|s| s.sentence().cloned()));
+        let settings = Memo::new(move |_| session.with(|s| s.settings().clone()));
+        let language = Memo::new(move |_| settings.with(|s| s.language.clone()));
+        let translation = Memo::new(move |_| {
+            let language = language.read();
+            if language.is_empty() {
+                return None;
+            }
+            sentence.with(|s| {
+                let (lang, text) = s.as_ref()?.translation(&language)?;
+                Some((html_lang(lang), text.to_string()))
+            })
+        });
+        Shown {
+            sentence,
+            segments: Memo::new(move |_| session.with(|s| s.segments())),
+            settings,
+            helpers: Memo::new(move |_| session.with(Session::helpers)),
+            completed: Memo::new(move |_| session.with(Session::completed)),
+            translation,
+        }
+    }
+
+    /// The translation's text, for the view.
+    fn translation_text(self) -> impl Fn() -> Option<String> + Copy {
+        move || {
+            self.translation
+                .with(|t| t.as_ref().map(|(_, text)| text.clone()))
+        }
+    }
+
+    /// The translation's HTML `lang`, for the view.
+    fn translation_lang(self) -> impl Fn() -> Option<String> + Copy {
+        move || {
+            self.translation
+                .with(|t| t.as_ref().map(|(lang, _)| lang.clone()))
+        }
+    }
 }
 
 impl App {
+    /// The game, whichever layout shows it: the saved settings read back,
+    /// the first sentence requested, the languages loading, the page shown
+    /// once its fonts are ready.
+    fn new() -> App {
+        // Settings that could not be read back take their defaults, and the
+        // player is told. Without saved ones (or a storage to keep them), it
+        // is a first run.
+        let (session, problems): (Session, Vec<String>) = match load_settings() {
+            Ok(Some(Restored { settings, problems })) => (
+                Session::new(settings),
+                problems.iter().map(js::chain).collect(),
+            ),
+            Ok(None) => (Session::first_run(), Vec::new()),
+            Err(error) => (Session::first_run(), vec![js::chain(&error)]),
+        };
+        let session = RwSignal::new(session);
+        let app = App {
+            session,
+            view: Shown::new(session),
+            store: StoredValue::new_local(data::Data::default()),
+            languages: RwSignal::new(Ok(Vec::new())),
+            loaded: StoredValue::new_local(None),
+            load: RwSignal::new(Ok(())),
+            voice: Notice::new(),
+            ime_on: RwSignal::new(false),
+            slip: Notice::new(),
+            problem: Notice::new(),
+            pointer: RwSignal::new(false),
+            pointer_timer: StoredValue::new_local(None),
+            options: RwSignal::new(false),
+            starter_pending: StoredValue::new(true),
+            start: Instant::now(),
+            refs: Refs {
+                sentence: NodeRef::new(),
+                done: NodeRef::new(),
+                audio: NodeRef::new(),
+            },
+        };
+        for problem in &problems {
+            leptos::logging::warn!("{problem}");
+        }
+        if !problems.is_empty() {
+            app.problem.flash(problems.join("; "));
+        }
+
+        // Answer the session's initial sentence request.
+        let mut initial = Vec::new();
+        app.session
+            .update(|s| initial.extend(std::iter::from_fn(|| s.poll_effect())));
+        initial.into_iter().for_each(|e| app.run(e));
+
+        spawn_local(async move {
+            match data::languages(app.store).await {
+                Ok(list) => {
+                    app.dispatch(Event::LanguagesLoaded {
+                        available: list.iter().map(|l| l.lang.clone()).collect(),
+                        browser: tatoeba::browser_language(&browser_languages(), &list, html_lang)
+                            .map(String::from),
+                    });
+                    app.languages.set(Ok(list));
+                }
+                Err(error) => {
+                    js::report("loading the translation languages", &error);
+                    app.languages.set(Err(Arc::new(error)));
+                }
+            }
+        });
+
+        // Reveal the page once fonts are ready.
+        spawn_local(async move {
+            // Without them the page shows anyway, in fallback fonts.
+            if let Some(ready) = document().fonts().ready().reported("waiting for the fonts") {
+                JsFuture::from(ready)
+                    .await
+                    .reported("waiting for the fonts");
+            }
+            show_page();
+        });
+        app
+    }
+
     fn now(&self) -> Duration {
         self.start.elapsed()
     }
@@ -653,85 +795,29 @@ fn choice_select<T: Copy + PartialEq + Send + Sync + 'static>(
 }
 
 #[component]
-fn Game() -> impl IntoView {
-    // Settings that could not be read back take their defaults, and the
-    // player is told. Without saved ones (or a storage to keep them), it is
-    // a first run.
-    let (session, problems): (Session, Vec<String>) = match load_settings() {
-        Ok(Some(Restored { settings, problems })) => (
-            Session::new(settings),
-            problems.iter().map(js::chain).collect(),
-        ),
-        Ok(None) => (Session::first_run(), Vec::new()),
-        Err(error) => (Session::first_run(), vec![js::chain(&error)]),
-    };
-    let app = App {
-        session: RwSignal::new(session),
-        store: StoredValue::new_local(data::Data::default()),
-        loaded: StoredValue::new_local(None),
-        load: RwSignal::new(Ok(())),
-        voice: Notice::new(),
-        ime_on: RwSignal::new(false),
-        slip: Notice::new(),
-        problem: Notice::new(),
-        pointer: RwSignal::new(false),
-        pointer_timer: StoredValue::new_local(None),
-        options: RwSignal::new(false),
-        starter_pending: StoredValue::new(true),
-        start: Instant::now(),
-        refs: Refs {
-            sentence: NodeRef::new(),
-            done: NodeRef::new(),
-            audio: NodeRef::new(),
-        },
-    };
-    for problem in &problems {
-        leptos::logging::warn!("{problem}");
-    }
-    if !problems.is_empty() {
-        app.problem.flash(problems.join("; "));
-    }
+fn Game(
+    /// The game, which outlives the layout showing it ([`Layout`]).
+    app: App,
+) -> impl IntoView {
     let session = app.session;
-    // The translation languages; a failed list says why in the options.
-    let languages: RwSignal<Result<Vec<Language>, Arc<data::DataError>>> =
-        RwSignal::new(Ok(Vec::new()));
-
-    // Answer the session's initial sentence request.
-    let mut initial = Vec::new();
-    session.update(|s| initial.extend(std::iter::from_fn(|| s.poll_effect())));
-    initial.into_iter().for_each(|e| app.run(e));
-
-    spawn_local(async move {
-        match data::languages(app.store).await {
-            Ok(list) => {
-                app.dispatch(Event::LanguagesLoaded {
-                    available: list.iter().map(|l| l.lang.clone()).collect(),
-                    browser: tatoeba::browser_language(&browser_languages(), &list, html_lang)
-                        .map(String::from),
-                });
-                languages.set(Ok(list));
-            }
-            Err(error) => {
-                js::report("loading the translation languages", &error);
-                languages.set(Err(Arc::new(error)));
-            }
-        }
-    });
+    let languages = app.languages;
 
     let listener = window_event_listener(ev::keydown, move |e| app.on_keydown(e));
     on_cleanup(move || listener.remove());
     let listener = window_event_listener(ev::mousemove, move |_| app.on_pointer());
     on_cleanup(move || listener.remove());
 
-    // Narrow memos: the session changes on every key, these only when what
-    // they hold does. (Copying the settings shares their known readings.)
-    let sentence = Memo::new(move |_| session.with(|s| s.sentence().cloned()));
-    let segments = Memo::new(move |_| session.with(|s| s.segments()));
-    let settings = Memo::new(move |_| session.with(|s| s.settings().clone()));
-    let completed = Memo::new(move |_| session.with(Session::completed));
+    // Narrow memos, beside the shared ones ([`Shown`]).
+    let Shown {
+        sentence,
+        segments,
+        settings,
+        helpers: shown,
+        completed,
+        ..
+    } = app.view;
     let stats = Memo::new(move |_| session.with(Session::stats));
     let outcome = Memo::new(move |_| session.with(|s| s.outcome().cloned()));
-    let shown = Memo::new(move |_| session.with(Session::helpers));
     let scoring = Memo::new(move |_| session.with(Session::scoring));
     let multiplier = Memo::new(move |_| session.with(Session::multiplier));
     let fade_pending = Memo::new(move |_| session.with(Session::fade_pending));
@@ -749,39 +835,17 @@ fn Game() -> impl IntoView {
         reached(Tier::Mushin) && matches!(panel.get(), Panel::Typing | Panel::Complete)
     });
 
-    // Body classes: what shows (furigana, the hint, the translation), the
-    // font, and when the controls step back: in Zen while typing and at
-    // 無心, unless the mouse moves.
+    // Body classes, beside the shared ones ([`Layout`]): when the controls
+    // step back, in Zen while typing and at 無心, unless the mouse moves.
+    // The phone has neither.
     Effect::new(move |_| {
-        let helpers = shown.get();
         let zen = settings.with(|s| s.mode == Some(Mode::Zen));
-        let classes = [
-            ("furigana", helpers.furigana),
-            ("hint", helpers.hint),
-            ("translation", helpers.translation),
-            ("mincho", settings.with(|s| s.mincho)),
+        page_classes(&[
             ("step-back", (zen && !completed.get()) || quiet.get()),
             ("pointer", app.pointer.get()),
-        ];
-        if let Some(body) = document().body() {
-            let list = body.class_list();
-            for (name, on) in classes {
-                list.toggle_with_force(name, on)
-                    .reported("setting a page class");
-            }
-        }
+        ]);
     });
-
-    // Reveal the page once fonts are ready.
-    spawn_local(async move {
-        // Without them the page shows anyway, in fallback fonts.
-        if let Some(ready) = document().fonts().ready().reported("waiting for the fonts") {
-            JsFuture::from(ready)
-                .await
-                .reported("waiting for the fonts");
-        }
-        show_page();
-    });
+    on_cleanup(|| page_classes(&[("step-back", false), ("pointer", false)]));
 
     // The key hint: a letter only with furigana and the hint on.
     let hint = Memo::new(move |_| {
@@ -797,24 +861,8 @@ fn Game() -> impl IntoView {
     };
     // The next key, for tests and assistive tools; shown or not.
     let next_key = move || session.with(|s| s.hint().map(String::from).unwrap_or_default());
-    // The translation shown, in the chosen language or else in English,
-    // with its `lang`.
-    let language = Memo::new(move |_| settings.with(|s| s.language.clone()));
-    let shown_translation = Memo::new(move |_| {
-        let language = language.read();
-        if language.is_empty() {
-            return None;
-        }
-        sentence.with(|s| {
-            let (lang, text) = s.as_ref()?.translation(&language)?;
-            Some((html_lang(lang), text.to_string()))
-        })
-    });
-    let translation = move || {
-        shown_translation.with(|t| t.as_ref().map(|(_, text)| text.clone()).unwrap_or_default())
-    };
-    let translation_lang =
-        move || shown_translation.with(|t| t.as_ref().map(|(lang, _)| lang.clone()));
+    let translation = app.view.translation_text();
+    let translation_lang = app.view.translation_lang();
     let tatoeba_id = move || sentence.with(|s| s.as_ref().and_then(|s| s.id.clone()));
     let refs = app.refs;
 
@@ -1088,17 +1136,6 @@ fn Game() -> impl IntoView {
                 </div>
             </ErrorBoundary>
 
-            // The recordings: the voice actor shows while one plays
-            // (upstream behaviour).
-            <audio
-                node_ref=refs.audio
-                on:play=move |_| {
-                    let author = app.loaded.read_value().as_ref().map(|a| a.author.clone());
-                    app.voice.show(author.unwrap_or_default());
-                }
-                on:pause=move |_| app.voice.shown.set(false)
-                on:ended=move |_| app.voice.shown.set(false)
-            ></audio>
 
             {move || (quiet.get() && completed.get()).then(|| view! {
                 <div class="seal" role="img"
@@ -1498,8 +1535,71 @@ fn main() {
         show_page();
         leptos::mount::mount_to_body(Framed);
     } else {
-        // Both layouts; the stylesheets show the one for the screen.
-        leptos::mount::mount_to_body(|| view! { <Game /> <mobile::Phone /> });
+        leptos::mount::mount_to_body(Layout);
+    }
+}
+
+/// The keyboard layout or the phone's ([`mobile::phone`]), following
+/// the screen: a phone turned, a window resized or the browser's responsive
+/// mode crossing the line swaps them. The game, made once here, goes on
+/// across the swap mid-sentence.
+#[component]
+fn Layout() -> impl IntoView {
+    let app = App::new();
+    let phone = RwSignal::new(mobile::phone());
+    // A query asked anew: one kept is not re-evaluated until after resize
+    // events.
+    let listener = window_event_listener(ev::resize, move |_| phone.set(mobile::phone()));
+    on_cleanup(move || listener.remove());
+
+    // Body classes for what shows (furigana, the hint, the translation) and
+    // the font, in either layout.
+    let Shown {
+        settings, helpers, ..
+    } = app.view;
+    Effect::new(move |_| {
+        let shown = helpers.get();
+        page_classes(&[
+            ("furigana", shown.furigana),
+            ("hint", shown.hint),
+            ("translation", shown.translation),
+            ("mincho", settings.with(|s| s.mincho)),
+        ]);
+    });
+
+    view! {
+        <Show when=move || phone.get() fallback=move || view! { <Game app /> }>
+            <mobile::Phone app />
+        </Show>
+        <Recordings app />
+    }
+}
+
+/// The page's classes, which the stylesheets follow: each on or off.
+fn page_classes(classes: &[(&str, bool)]) {
+    if let Some(body) = document().body() {
+        let list = body.class_list();
+        for &(name, on) in classes {
+            list.toggle_with_force(name, on)
+                .reported("setting a page class");
+        }
+    }
+}
+
+/// The recordings' player, one for both layouts: the voice actor shows
+/// while one plays (upstream behaviour).
+#[component]
+fn Recordings(app: App) -> impl IntoView {
+    view! {
+        <audio
+            node_ref=app.refs.audio
+            on:play=move |_| {
+                let author = app.loaded.read_value().as_ref().map(|a| a.author.clone());
+                app.voice.show(author.unwrap_or_default());
+            }
+            on:pause=move |_| app.voice.shown.set(false)
+            on:ended=move |_| app.voice.shown.set(false)
+        ></audio>
     }
 }
 

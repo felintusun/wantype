@@ -111,7 +111,8 @@ body {
   background: var(--paper);
   font-family: var(--font-gothic);
 }
-body.mincho #sentenceContainer {
+body.mincho #sentenceContainer,
+body.mincho .lens {
   font-family: var(--font-mincho);
 }
 

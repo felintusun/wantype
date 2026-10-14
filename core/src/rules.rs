@@ -342,7 +342,7 @@ pub(crate) struct Step {
 
 /// Direct kana input as typed on a JIS kana keyboard: the base hiragana,
 /// then the separate (spacing) dakuten/handakuten key if any (`ガ` → `か゛`).
-fn kana_keys(c: char) -> Option<String> {
+pub(crate) fn kana_keys(c: char) -> Option<String> {
     if !is_char_kana(c) {
         return None;
     }

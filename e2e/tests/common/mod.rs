@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use fantoccini::actions::{InputSource, PointerAction, TouchActions, MOUSE_BUTTON_LEFT};
 use fantoccini::error::{CmdError, NewSessionError};
 use fantoccini::{Client, ClientBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -372,6 +373,37 @@ pub async fn body_has(client: &Client, class: &str) -> E2eResult<bool> {
         &[json!(class)],
     )
     .await
+}
+
+/// A finger on the element `css`: down at its centre, moved `dx` right and
+/// `dy` down, lifted (a tap when it does not move).
+pub async fn touch(client: &Client, css: &str, dx: f64, dy: f64) -> E2eResult {
+    let element = client
+        .find(fantoccini::Locator::Css(css))
+        .await
+        .map_err(browser(css))?;
+    let finger = TouchActions::new("finger".into())
+        .then(PointerAction::MoveToElement {
+            element,
+            duration: None,
+            x: 0.0,
+            y: 0.0,
+        })
+        .then(PointerAction::Down {
+            button: MOUSE_BUTTON_LEFT,
+        })
+        .then(PointerAction::MoveBy {
+            duration: Some(Duration::from_millis(40)),
+            x: dx,
+            y: dy,
+        })
+        .then(PointerAction::Up {
+            button: MOUSE_BUTTON_LEFT,
+        });
+    client
+        .perform_actions(finger)
+        .await
+        .map_err(browser(format!("touching {css}")))
 }
 
 pub async fn click(client: &Client, css: &str) -> E2eResult {

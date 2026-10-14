@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::flick::{Composer, Flick, Pad};
 use crate::ladder::{self, Helper, Helpers, Ladder, Mode, Numerals, Outcome, Recorded, Tier};
 use crate::matcher::Matcher;
 use crate::sentence::{segments, Audio, Segment, Sentence, FALLBACK_LANGUAGE};
@@ -61,6 +62,8 @@ pub struct Modifiers {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Key(Key, Modifiers),
+    /// A gesture on the flick pad (a phone's keyboard).
+    Flick(Pad, Flick),
     /// Answer to [`Effect::RequestSentence`].
     SentenceLoaded(Sentence),
     /// [`Effect::RequestSentence`] could not be fulfilled (e.g. no sentence
@@ -304,6 +307,8 @@ struct Round {
     seen: Helpers,
     /// Completed before a restart: a retry is not scored again.
     completed_before: bool,
+    /// Flick input: the kana held back for ゛゜小.
+    composer: Composer,
 }
 
 impl Round {
@@ -317,6 +322,7 @@ impl Round {
             last: None,
             seen,
             completed_before: false,
+            composer: Composer::default(),
         }
     }
 
@@ -327,6 +333,7 @@ impl Round {
         self.errors.clear();
         self.started = None;
         self.last = None;
+        self.composer.clear();
     }
 }
 
@@ -376,6 +383,7 @@ impl Session {
     pub fn handle(&mut self, event: Event, now: Duration) {
         match event {
             Event::Key(key, mods) => self.handle_key(key, mods, now),
+            Event::Flick(pad, flick) => self.flick(pad, flick, now),
             Event::SentenceLoaded(sentence) => self.load(sentence),
             Event::SentenceFailed => self.loading = false,
             Event::Next => self.request_sentence(),
@@ -507,6 +515,17 @@ impl Session {
         }
         self.outcome = None;
         self.round = Some(Round::new(sentence, self.helpers()));
+    }
+
+    /// A gesture types what the composer lets through ([`Composer::input`]).
+    fn flick(&mut self, pad: Pad, flick: Flick, now: Duration) {
+        let Some(round) = &mut self.round else { return };
+        let keys = round
+            .composer
+            .input(pad, flick, round.matcher.current_kana());
+        for key in keys.chars() {
+            self.type_char(key, now);
+        }
     }
 
     fn type_char(&mut self, c: char, now: Duration) {
@@ -696,10 +715,17 @@ impl Session {
         self.round.as_ref().is_some_and(|r| r.matcher.completed())
     }
 
-    /// The kana at the cursor, what a [`flick::Composer`](crate::flick)
-    /// aims for; `None` when completed or without a sentence.
-    pub fn next_kana(&self) -> Option<char> {
-        self.round.as_ref()?.matcher.current_kana()
+    /// The kana held back for ゛゜小 ([`Event::Flick`]), shown as being
+    /// typed.
+    pub fn held(&self) -> Option<char> {
+        self.round.as_ref()?.composer.held()
+    }
+
+    /// The gesture on the flick pad that brings the kana at the cursor
+    /// closer; `None` when completed or without a sentence.
+    pub fn flick_hint(&self) -> Option<(Pad, Flick)> {
+        let round = self.round.as_ref()?;
+        round.composer.hint(round.matcher.current_kana())
     }
 
     pub fn stats(&self) -> Stats {
@@ -786,6 +812,31 @@ mod tests {
         for c in input.chars() {
             s.handle(key(c), ms(0));
         }
+    }
+
+    #[test]
+    fn a_flicked_kana_waits_for_its_turn_within_the_round() -> TestResult {
+        let mut s = loaded("ちゃ", false)?;
+        // ち, then や held for ゃ.
+        let hold = |s: &mut Session| {
+            for (pad, flick) in [(Pad::Ta, Flick::Left), (Pad::Ya, Flick::Tap)] {
+                s.handle(Event::Flick(pad, flick), ms(0));
+            }
+        };
+        hold(&mut s);
+        assert_eq!(s.held(), Some('や'));
+        assert_eq!(s.flick_hint(), Some((Pad::Turn, Flick::Tap)));
+        // A retry, or a new sentence, drops it.
+        s.handle(Event::Restart, ms(0));
+        assert_eq!(s.held(), None);
+        hold(&mut s);
+        s.handle(Event::SentenceLoaded(sentence("ちゃ", false)?), ms(0));
+        assert_eq!(s.held(), None);
+        hold(&mut s);
+        s.handle(Event::Flick(Pad::Turn, Flick::Tap), ms(0));
+        assert!(s.completed());
+        assert_eq!(s.stats().mistakes, 0);
+        Ok(())
     }
 
     #[test]

@@ -455,17 +455,19 @@ async fn refuses_to_run_in_a_frame() -> E2eResult {
     close(client).await
 }
 
-/// Tablets play too, a keyboard of their own being up to the player: in
-/// portrait the card narrows to the window with nothing cut off. Only a
-/// phone gets the note instead.
+/// Whether the page mounted only `arguments[0]`: the keyboard layout
+/// (`main`) or the phone's (`.phone`).
+const LAYOUT: &str =
+    "['main', '.phone'].filter(s => document.querySelector(s)).join() === arguments[0]";
+
+/// Tablets play the keyboard layout, a keyboard of their own being up to
+/// the player: in portrait the card narrows to the window with nothing cut
+/// off.
 #[tokio::test]
 #[ignore]
 async fn fits_a_tablet() -> E2eResult {
     let out = out_dir("smoke")?;
     let (client, _driver, port) = launch(ENGLISH).await?;
-    // Which layout shows: the keyboard one (`main`) or the phone's.
-    let layout = "['main', '.phone'] \
-        .filter(s => getComputedStyle(document.querySelector(s)).display !== 'none')";
     // What leaves the window, or a row too narrow for what it holds.
     let cut_off = "(() => { \
         const name = e => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') \
@@ -483,7 +485,8 @@ async fn fits_a_tablet() -> E2eResult {
     for (width, height, name) in [(600, 960, "tablet-600"), (768, 1024, "tablet-768")] {
         resize(&client, width, height).await?;
         visit(&client, port).await?;
-        assert_eq!(js(&client, layout).await?, json!(["main"]), "{name}");
+        let keyboard = js_bool_with(&client, LAYOUT, &[json!("main")]).await?;
+        assert!(keyboard, "{name}: not the keyboard layout");
         screenshot(&client, &out, &format!("{name}-welcome")).await?;
         let cut = js(&client, cut_off).await?;
         assert_eq!(cut, json!([]), "{name}: the choice cut off");
@@ -493,9 +496,84 @@ async fn fits_a_tablet() -> E2eResult {
         assert_eq!(cut, json!([]), "{name}: the game cut off");
         js(&client, "(localStorage.clear(), true)").await?;
     }
-    resize(&client, 390, 844).await?;
+    // Narrowed past a phone's width and back, as the browser's responsive
+    // mode does, the layout follows without a reload.
+    resize(&client, 500, 900).await?;
+    wait_for_with(&client, "the phone layout", LAYOUT, &[json!(".phone")]).await?;
+    resize(&client, 768, 1024).await?;
+    wait_for_with(&client, "the keyboard layout", LAYOUT, &[json!("main")]).await?;
+    close(client).await
+}
+
+/// A phone plays with the flick pad: following its hints (a key, a flick,
+/// ゛゜小 for ャ, ド and デ) types the starter, the column sliding up past the
+/// square to type.
+#[tokio::test]
+#[ignore]
+async fn plays_on_a_phone() -> E2eResult {
+    let out = out_dir("smoke")?;
+    let (client, _driver, port) = launch(ENGLISH).await?;
+    // Headless Firefox goes no narrower than 500 px: still a phone.
+    resize(&client, 500, 900).await?;
     visit(&client, port).await?;
-    assert_eq!(js(&client, layout).await?, json!([".phone"]), "a phone");
+    let phone = js_bool_with(&client, LAYOUT, &[json!(".phone")]).await?;
+    assert!(phone, "not the phone layout");
+    watch_policy(&client).await?;
+    screenshot(&client, &out, "phone-welcome").await?;
+    click(&client, ".welcome-card").await?;
+    wait_for(
+        &client,
+        "the choice made",
+        "document.querySelector('.welcome').hidden",
+    )
+    .await?;
     screenshot(&client, &out, "phone").await?;
+
+    // The hinted key, as its place on the pad and the way to flick.
+    let hinted = "(k => k && [[...k.parentNode.children].indexOf(k) + 1, k.dataset.hint]) \
+        (document.querySelector('.pad-key[data-hint]'))";
+    let at = "getComputedStyle(document.querySelector('.lens')).getPropertyValue('--at')";
+    let mut flicks = 0;
+    while let serde_json::Value::Array(hint) = js(&client, hinted).await? {
+        let [serde_json::Value::Number(key), serde_json::Value::String(way)] = hint.as_slice()
+        else {
+            return Err(E2eError::Type {
+                expression: hinted.into(),
+                value: serde_json::Value::Array(hint),
+                kind: "[key, flick]",
+            });
+        };
+        let (dx, dy) = match way.as_str() {
+            "left" => (-40.0, 0.0),
+            "up" => (0.0, -40.0),
+            "right" => (40.0, 0.0),
+            "down" => (0.0, 40.0),
+            _ => (0.0, 0.0),
+        };
+        touch(&client, &format!(".pad-key:nth-child({key})"), dx, dy).await?;
+        flicks += 1;
+        if flicks == 6 {
+            assert_eq!(
+                js_str(&client, at).await?,
+                "5",
+                "the column slid past チャンスは"
+            );
+            screenshot(&client, &out, "phone-typing").await?;
+            // Turned to the keyboard layout and back, as a phone turned by
+            // mistake, the sentence is where it was.
+            resize(&client, 768, 1024).await?;
+            wait_for_with(&client, "the keyboard layout", LAYOUT, &[json!("main")]).await?;
+            resize(&client, 500, 900).await?;
+            wait_for_with(&client, "the phone layout", LAYOUT, &[json!(".phone")]).await?;
+            assert_eq!(js_str(&client, at).await?, "5", "the place kept");
+        }
+        assert!(flicks < 40, "the hints went round in circles");
+    }
+    // チャンスは何度でもあるワン！: 15 kana and a mark, ャ, ド and デ turned.
+    assert_eq!(flicks, 18, "flicks for the starter");
+    let done = "document.querySelector('.phone-bar .ready') !== null";
+    assert!(js_bool(&client, done).await?, "the starter not completed");
+    screenshot(&client, &out, "phone-done").await?;
+    assert_eq!(js(&client, "blocked").await?, json!([]), "CSP violations");
     close(client).await
 }

@@ -143,6 +143,39 @@ fn padded(mut line: Line, width: usize) -> Line {
 /// Squares per column: ten down, so that a column fits the card.
 pub const WIDTH: usize = 10;
 
+/// The squares a segment takes: one per char.
+fn width_of(segment: &Segment) -> usize {
+    match segment {
+        Segment::Plain(_) => 1,
+        Segment::Ruby { text, .. } => text.chars().count(),
+    }
+}
+
+/// The squares `segments` take.
+pub fn squares(segments: &[Segment]) -> usize {
+    segments.iter().map(width_of).sum()
+}
+
+/// The first square of the segment being typed; past the last once all
+/// are typed.
+pub fn active_square(segments: &[Segment]) -> usize {
+    segments
+        .iter()
+        .take_while(|s| state_of(s).0 != Progress::Active)
+        .map(width_of)
+        .sum()
+}
+
+/// A segment's progress and whether a key was missed in it.
+fn state_of(segment: &Segment) -> (Progress, bool) {
+    match segment {
+        Segment::Plain(t) => (t.progress, t.error),
+        Segment::Ruby {
+            progress, error, ..
+        } => (*progress, *error),
+    }
+}
+
 fn class(progress: Progress) -> &'static str {
     match progress {
         Progress::Done => "done",
@@ -151,14 +184,9 @@ fn class(progress: Progress) -> &'static str {
     }
 }
 
-/// A segment's progress and whether a key was missed in it.
+/// Segment `index`'s progress and whether a key was missed in it.
 fn state(segments: &[Segment], index: usize) -> Option<(Progress, bool)> {
-    match segments.get(index)? {
-        Segment::Plain(t) => Some((t.progress, t.error)),
-        Segment::Ruby {
-            progress, error, ..
-        } => Some((*progress, *error)),
-    }
+    segments.get(index).map(state_of)
 }
 
 /// The progress of kana `kana` of segment `index`'s reading.
@@ -278,6 +306,21 @@ mod tests {
 
     fn text(line: &Line) -> String {
         line.squares.iter().map(|s| s.ch.unwrap_or('□')).collect()
+    }
+
+    #[test]
+    fn the_active_square_is_the_first_of_its_segment() -> Result<(), ParseError> {
+        // 日本 is one segment of two squares, read にほん.
+        let at =
+            |typed| layout("これは[日本|にほん]です。", typed, 99).map(|(_, s)| active_square(&s));
+        assert_eq!(at(0)?, 0);
+        assert_eq!(at(3)?, 3);
+        // Halfway through にほん the square to type is still 日.
+        assert_eq!(at(4)?, 3);
+        assert_eq!(at(6)?, 5);
+        let (_, all) = layout("これは[日本|にほん]です。", 9, 99)?;
+        assert_eq!((active_square(&all), squares(&all)), (8, 8));
+        Ok(())
     }
 
     #[test]

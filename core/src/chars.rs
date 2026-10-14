@@ -38,7 +38,7 @@ fn lookup<T>(table: &'static [(char, T)], c: char) -> Option<&'static T> {
     i.into_iter().find_map(|i| table.get(i)).map(|(_, to)| to)
 }
 
-fn single(mut chars: impl Iterator<Item = char>) -> Option<char> {
+pub(crate) fn single(mut chars: impl Iterator<Item = char>) -> Option<char> {
     match (chars.next(), chars.next()) {
         (Some(c), None) => Some(c),
         _ => None,

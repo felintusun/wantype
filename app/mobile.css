@@ -1,20 +1,165 @@
 /* WanType on a phone (`mobile.rs`), apart from the keyboard layout
-   (`style.css`) that desktops and tablets play, whatever keyboard their
-   players bring. A phone's own keyboard sends no keys: for now it gets a
-   note instead of the game. The colours and fonts are `style.css`'s. */
+   (`style.css`) that desktops and tablets play. The page mounts one or the
+   other; the colours, fonts and the manuscript squares are `style.css`'s.
+
+   From the top: retry and skip, the lens (the sentence as one column that
+   slides up past the square to type), the translation, the flick pad.
+   Only the column and the square to type move. */
 
 .phone {
-  display: none;
+  position: relative;
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: 44px 1fr auto auto;
+  gap: 12px;
+  padding: 12px 12px max(12px, env(safe-area-inset-bottom));
+  /* The squares, larger than on the card: the lens shows few. */
+  --cell: 52px;
+  --strip: 20px;
+  /* The row of the lens the square to type is held at. */
+  --lens-row: 2;
+}
+body.loading .phone {
+  visibility: hidden;
 }
 
-@media (max-width: 599px) {
-  main {
-    display: none;
-  }
-  .phone {
-    display: block;
-    max-width: 32em;
-    margin-inline: 1.5em;
-    line-height: 1.7;
-  }
+.phone-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+/* THE LENS: the column slides so the square to type stays on the lens
+   row; what is typed fades out above, what comes fades in below. */
+
+.lens {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  justify-content: center;
+  align-content: start;
+  line-height: 1;
+  mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
+}
+.lens .genko-sheet {
+  translate: 0 calc((var(--lens-row) - var(--at, 0)) * var(--cell));
+  transition: translate 160ms ease-out;
+}
+/* A kana the ゛゜小 key may still turn, beside the square it is for. */
+.lens-held {
+  position: absolute;
+  top: calc(var(--lens-row) * var(--cell));
+  right: calc(50% + (var(--cell) + var(--strip)) / 2 + 6px);
+  height: var(--cell);
+  display: grid;
+  place-items: center;
+  font-size: calc(var(--cell) * 0.5);
+  color: var(--shu);
+}
+
+/* The translation's row keeps its height when it is off. */
+.phone-translation {
+  min-height: 3.4em;
+  font-size: 15px;
+  line-height: 1.7;
+  text-align: center;
+  color: var(--text-2);
+}
+body:not(.translation) .phone-translation {
+  visibility: hidden;
+}
+
+/* THE PAD: twelve keys, a tap types the middle kana, a flick the one on
+   that side. Touches are the pad's own: no scrolling, no zoom. */
+
+.pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pad-key {
+  position: relative;
+  height: 56px;
+  border: 1px solid var(--settings-border);
+  border-radius: 6px;
+  background: var(--paper);
+}
+.pad-char {
+  position: absolute;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--faint);
+}
+.pad-char.tap {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  color: var(--ink);
+}
+.pad-char.left,
+.pad-char.right {
+  top: 50%;
+  translate: 0 -50%;
+}
+.pad-char.left {
+  left: 6px;
+}
+.pad-char.right {
+  right: 6px;
+}
+.pad-char.up,
+.pad-char.down {
+  left: 50%;
+  translate: -50% 0;
+}
+.pad-char.up {
+  top: 4px;
+}
+.pad-char.down {
+  bottom: 4px;
+}
+
+/* The hint: the key washed, the kana to flick to in vermilion. */
+.pad-key[data-hint] {
+  border-color: var(--rule);
+  background: var(--wash);
+}
+.pad-key[data-hint='tap'] .pad-char.tap,
+.pad-key[data-hint='left'] .pad-char.left,
+.pad-key[data-hint='up'] .pad-char.up,
+.pad-key[data-hint='right'] .pad-char.right,
+.pad-key[data-hint='down'] .pad-char.down {
+  color: var(--shu);
+}
+
+/* Touched: the key darkens, the kana the touch is going to in ink. */
+.pad-key[data-toward] {
+  background: var(--highlight);
+}
+.pad-key[data-toward='left'] .pad-char.left,
+.pad-key[data-toward='up'] .pad-char.up,
+.pad-key[data-toward='right'] .pad-char.right,
+.pad-key[data-toward='down'] .pad-char.down {
+  color: var(--ink);
+  font-weight: bold;
+}
+
+/* SHEETS (the first run's choice) cover the phone, their cards stacked;
+   no keys to press. */
+
+.phone .sheet {
+  padding: 24px 20px;
+}
+.phone .welcome-cards {
+  grid-template-columns: 1fr;
+}
+.phone .welcome-card .key {
+  display: none;
 }

@@ -106,7 +106,7 @@ impl Matcher {
         let mut m = Matcher::new(text);
         let mut typed = String::new();
         while let Some(key) = m.hint() {
-            let at = m.japanese_text.get(m.japanese_index()).copied();
+            let at = m.current_kana();
             if !key.is_ascii() {
                 return Err(RomajiError::NotAKey { at, key });
             }
@@ -140,9 +140,6 @@ impl Matcher {
 
     /// The kana at the cursor (folded, as matched), `None` once completed.
     pub fn current_kana(&self) -> Option<char> {
-        if self.completed {
-            return None;
-        }
         self.japanese_text.get(self.japanese_index()).copied()
     }
 

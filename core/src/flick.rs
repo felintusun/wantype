@@ -10,8 +10,12 @@
 //! [`Composer`] holds a kana back while ゛゜小 can still turn it into the
 //! one at the cursor (や for ゃ), and passes everything else on at once.
 
-use crate::chars::{fold, split_voiced};
+use wana_kana::utils::katakana_to_hiragana;
+
+use crate::chars::{fold, single};
+use crate::compat::VOICED;
 use crate::matcher::Matcher;
+use crate::rules::kana_keys;
 
 /// A key of the pad, in reading order: rows of three ([`PAD`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,6 +62,30 @@ pub enum Flick {
     Down,
 }
 
+impl Flick {
+    /// How far a touch travels to flick rather than tap, in CSS pixels.
+    pub const REACH: f64 = 24.0;
+
+    /// The flick of a touch that moved `dx` right and `dy` down from
+    /// where it began: a tap within [`Flick::REACH`], else the way it went
+    /// most.
+    pub fn of_motion(dx: f64, dy: f64) -> Flick {
+        if dx.hypot(dy) < Flick::REACH {
+            Flick::Tap
+        } else if dx.abs() > dy.abs() {
+            if dx < 0.0 {
+                Flick::Left
+            } else {
+                Flick::Right
+            }
+        } else if dy < 0.0 {
+            Flick::Up
+        } else {
+            Flick::Down
+        }
+    }
+}
+
 /// The flicks, in the order of [`Pad::chars`].
 pub const FLICKS: [Flick; 5] = [
     Flick::Tap,
@@ -88,75 +116,61 @@ impl Pad {
         }
     }
 
-    /// What `flick` types on this key.
+    /// What `flick` types on this key ([`Flick`] is declared in [`FLICKS`]
+    /// order).
     pub fn char(self, flick: Flick) -> Option<char> {
-        let i = FLICKS.iter().position(|&f| f == flick)?;
-        self.chars().get(i).copied().flatten()
+        self.chars().get(flick as usize).copied().flatten()
     }
 }
 
-/// What ゛゜小 turns a kana into, in turn, the kana itself first; empty
-/// for a kana it does not turn.
-fn turns(kana: char) -> &'static [char] {
-    match kana {
-        'あ' => &['あ', 'ぁ'],
-        'い' => &['い', 'ぃ'],
-        'う' => &['う', 'ぅ', 'ゔ'],
-        'え' => &['え', 'ぇ'],
-        'お' => &['お', 'ぉ'],
-        'か' => &['か', 'が'],
-        'き' => &['き', 'ぎ'],
-        'く' => &['く', 'ぐ'],
-        'け' => &['け', 'げ'],
-        'こ' => &['こ', 'ご'],
-        'さ' => &['さ', 'ざ'],
-        'し' => &['し', 'じ'],
-        'す' => &['す', 'ず'],
-        'せ' => &['せ', 'ぜ'],
-        'そ' => &['そ', 'ぞ'],
-        'た' => &['た', 'だ'],
-        'ち' => &['ち', 'ぢ'],
-        'つ' => &['つ', 'っ', 'づ'],
-        'て' => &['て', 'で'],
-        'と' => &['と', 'ど'],
-        'は' => &['は', 'ば', 'ぱ'],
-        'ひ' => &['ひ', 'び', 'ぴ'],
-        'ふ' => &['ふ', 'ぶ', 'ぷ'],
-        'へ' => &['へ', 'べ', 'ぺ'],
-        'ほ' => &['ほ', 'ぼ', 'ぽ'],
-        'や' => &['や', 'ゃ'],
-        'ゆ' => &['ゆ', 'ゅ'],
-        'よ' => &['よ', 'ょ'],
-        'わ' => &['わ', 'ゎ'],
-        _ => &[],
-    }
+/// The small kana ゛゜小 turns a kana into first.
+fn small(kana: char) -> Option<char> {
+    let small = match kana {
+        'あ' => 'ぁ',
+        'い' => 'ぃ',
+        'う' => 'ぅ',
+        'え' => 'ぇ',
+        'お' => 'ぉ',
+        'つ' => 'っ',
+        'や' => 'ゃ',
+        'ゆ' => 'ゅ',
+        'よ' => 'ょ',
+        'わ' => 'ゎ',
+        _ => return None,
+    };
+    Some(small)
+}
+
+/// What ゛゜小 turns a kana into, in turn: the kana itself, its small form,
+/// then with ゛ and ゜ ([`VOICED`]). は → ば → ぱ, つ → っ → づ.
+fn turns(kana: char) -> impl Iterator<Item = char> + Clone {
+    let voiced = VOICED
+        .iter()
+        .filter(move |&&(_, base, _)| base == kana)
+        .map(|&(voiced, ..)| voiced);
+    std::iter::once(kana).chain(small(kana)).chain(voiced)
+}
+
+/// Whether ゛゜小 turns `kana` into `to` (or it is `to` already).
+fn turns_into(kana: char, to: char) -> bool {
+    turns(kana).any(|k| k == to)
 }
 
 /// `kana` turned `n` times.
 fn turned(kana: char, n: usize) -> char {
-    let all = turns(kana);
-    match all.len() {
-        0 => kana,
-        len => all.get(n % len).copied().unwrap_or(kana),
-    }
+    turns(kana).cycle().nth(n).unwrap_or(kana)
 }
 
 /// `c` as compared: folded as the matcher folds, katakana as hiragana
 /// (the pad has hiragana; katakana are typed with them).
 fn plain(c: char) -> char {
     let c = fold(c);
-    match c {
-        'ァ'..='ヶ' => char::from_u32(c as u32 - 0x60).unwrap_or(c),
-        _ => c,
-    }
+    single(katakana_to_hiragana(&c.to_string()).chars()).unwrap_or(c)
 }
 
-/// The matcher's keys for `kana`: a voiced kana as its base and mark.
+/// The matcher's keys for `kana` ([`kana_keys`]); a mark as itself.
 fn keys(kana: char) -> String {
-    match split_voiced(kana) {
-        Some((base, mark)) => [base, mark].into_iter().collect(),
-        None => kana.to_string(),
-    }
+    kana_keys(kana).unwrap_or_else(|| kana.to_string())
 }
 
 /// A turn with nothing to turn, which the matcher refuses: a wrong key.
@@ -182,7 +196,7 @@ impl Composer {
     }
 
     /// The keys `flick` on `pad` types now, `target` being the kana at the
-    /// cursor ([`Session::next_kana`](crate::Session::next_kana)). Empty
+    /// cursor ([`Event::Flick`](crate::Event::Flick)). Empty
     /// while a kana is held back, or for a flick toward nothing.
     pub fn input(&mut self, pad: Pad, flick: Flick, target: Option<char>) -> String {
         let target = target.map(plain);
@@ -205,9 +219,9 @@ impl Composer {
             .take()
             .map(|(kana, n)| keys(turned(kana, n)))
             .unwrap_or_default();
-        let c = plain(c);
+        let c = fold(c);
         match target {
-            Some(t) if t != c && turns(c).contains(&t) => self.held = Some((c, 0)),
+            Some(t) if t != c && turns_into(c, t) => self.held = Some((c, 0)),
             _ => typed.push_str(&keys(c)),
         }
         typed
@@ -217,16 +231,12 @@ impl Composer {
     /// ゛゜小 for the kana held back, else the key and flick of its row.
     pub fn hint(&self, target: Option<char>) -> Option<(Pad, Flick)> {
         let t = plain(target?);
-        if self.held.is_some_and(|(kana, _)| turns(kana).contains(&t)) {
+        if self.held.is_some_and(|(kana, _)| turns_into(kana, t)) {
             return Some((Pad::Turn, Flick::Tap));
         }
         PAD.iter()
             .flat_map(|&pad| FLICKS.map(|flick| (pad, flick)))
-            .find(|&(pad, flick)| {
-                pad.char(flick)
-                    .map(plain)
-                    .is_some_and(|c| c == t || turns(c).contains(&t))
-            })
+            .find(|&(pad, flick)| pad.char(flick).map(fold).is_some_and(|c| turns_into(c, t)))
     }
 }
 
@@ -320,6 +330,15 @@ mod tests {
         // types nothing.
         assert_eq!(c.input(Pad::Turn, Flick::Tap, Some('か')), "゛");
         assert_eq!(c.input(Pad::Wa, Flick::Down, Some('か')), "");
+    }
+
+    #[test]
+    fn a_touch_flicks_the_way_it_went_most() {
+        assert_eq!(Flick::of_motion(3.0, -5.0), Flick::Tap);
+        assert_eq!(Flick::of_motion(-40.0, 10.0), Flick::Left);
+        assert_eq!(Flick::of_motion(5.0, -30.0), Flick::Up);
+        assert_eq!(Flick::of_motion(30.0, 29.0), Flick::Right);
+        assert_eq!(Flick::of_motion(0.0, 24.0), Flick::Down);
     }
 
     #[test]
